@@ -42,13 +42,13 @@ async function start() {
   // 4. Input Orchestration
   setupPointer(
     canvas,
-    (x, y, p, e) => {
+    (x: number, y: number, p: number, e: PointerEvent) => {
       // Check nav.isNavigating (the getter we made)
       if (nav.isNavigating || e.buttons !== 1) return;
       const coords = translateCoords(e.clientX, e.clientY);
       strokeEngine.beginStroke(coords.x, coords.y, p);
     },
-    (x, y, p, e) => {
+    (x: number, y: number, p: number, e: PointerEvent) => {
       // If we start navigating (press Space) mid-stroke, end it.
       if (nav.isNavigating || e.buttons !== 1) {
         if (strokeEngine.isDrawing) {
@@ -60,7 +60,7 @@ async function start() {
       const coords = translateCoords(e.clientX, e.clientY);
       strokeEngine.addPoint(coords.x, coords.y, p);
     },
-    (x, y, p, e) => {
+    (x: number, y: number, p: number, e: PointerEvent) => {
       const coords = translateCoords(e.clientX, e.clientY);
       strokeEngine.endStroke(coords.x, coords.y, p);
     }

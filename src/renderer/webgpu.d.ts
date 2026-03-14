@@ -1,7 +1,7 @@
 export declare function initGPU(): Promise<{
-    device: any;
+    device: GPUDevice;
     context: GPUCanvasContext;
-    format: any;
+    format: GPUTextureFormat;
     canvas: HTMLCanvasElement;
 }>;
 //# sourceMappingURL=webgpu.d.ts.map

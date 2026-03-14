@@ -1,25 +1,26 @@
 {
   "compilerOptions": {
-    "target": "esnext",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    
-    /* Add these two lines */
-    "types": ["@webgpu/types"],
-    "lib": ["esnext", "dom", "dom.iterable"],
-
-    "sourceMap": true,
-    "declaration": true,
-    "declarationMap": true,
-
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "verbatimModuleSyntax": true,
-    "isolatedModules": true,
-    "noUncheckedSideEffectImports": true,
-    "moduleDetection": "force",
+    "target": "ESNext",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
-    "jsx": "react-jsx"
-  }
+
+    /* Bundler mode is the standard for Vite */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": false,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    /* WebGPU and Vite Support */
+    "types": ["@webgpu/types", "vite/client"],
+
+    /* Strictness */
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"]
 }
