@@ -19,16 +19,16 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22 # Stable long-term support
           cache: 'npm'
 
       - name: Install dependencies
-        # This ignores any existing node_modules and installs from package-lock.json
-        run: npm ci
+        # Use install instead of ci for one run to rebuild the lockfile if needed
+        run: npm install 
 
       - name: Build
-        # We run vite directly via npx to bypass shell path issues
-        run: npx vite build
+        # We point directly to the binary to avoid "command not found" errors
+        run: ./node_modules/.bin/vite build --base /gpu-paint/
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
