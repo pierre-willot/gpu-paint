@@ -64,3 +64,72 @@ input[type="range"] {
   cursor: pointer;
   accent-color: #3b82f6;
 }
+
+.layer-panel {
+  position: absolute;
+  right: 20px;
+  top: 20px;
+  background: rgba(40, 40, 40, 0.9);
+  color: white;
+  padding: 15px;
+  border-radius: 8px;
+  font-family: sans-serif;
+}
+
+.layer-item {
+  padding: 10px;
+  margin-bottom: 5px;
+  background: #444;
+  cursor: pointer;
+  border: 2px solid transparent;
+}
+
+.layer-item.active {
+  border-color: #007bff;
+  background: #555;
+}
+
+#layer-manager {
+  position: fixed;
+  right: 20px;
+  top: 20px;
+  width: 180px;
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+  z-index: 100;
+}
+
+.layer-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  margin-bottom: 5px;
+  background: #383838;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  color: #eee;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.layer-item.active {
+  background: #4a4a4a;
+  border-color: #007bff;
+}
+
+.delete-layer {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 10px;
+  transition: color 0.2s;
+}
+
+.delete-layer:hover {
+  color: #ff4d4d;
+}

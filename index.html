@@ -11,12 +11,26 @@
     <div id="workspace">
         <canvas id="canvas"></canvas>
     </div>
+    
+    <div id="ui-container">
+  <div class="layer-panel">
+    <h3>Layers</h3>
+    <div id="layer-list">
+      </div>
+    <button id="add-layer-btn">+ Add Layer</button>
+  </div>
+  
+</div>
 
   <div id="controls">
         <label for="sizeSlider">Brush Size</label>
         <input type="range" id="sizeSlider" min="0.005" max="0.5" step="0.001" value="0.05">
-        <button id="clearBtn">Clear Canvas</button>
         <button id="saveBtn">Save Image</button>
+
+        <div class="controls">
+    <button id="undoBtn" title="Undo (Ctrl+Z)">⟲ Undo</button>
+    <button id="redoBtn" title="Redo (Ctrl+Y)">⟳ Redo</button>
+    </div>
   </div>
 
   <script type="module" src="./src/main.ts"></script>
