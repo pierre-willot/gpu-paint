@@ -23,10 +23,12 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        # 'npm ci' is faster and more reliable than 'npm install' in CI
+        run: npm ci 
 
       - name: Build
-        run: npm run build
+        # We use npx to ensure the environment finds the local vite binary
+        run: npx tsc && npx vite build
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -39,3 +41,4 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        
