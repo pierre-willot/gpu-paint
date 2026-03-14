@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]
+    branches: ["main"] # Or "master"
 
 permissions:
   contents: read
@@ -19,16 +19,15 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22 # Stable long-term support
+          node-version: 20
           cache: 'npm'
 
       - name: Install dependencies
-        # Use install instead of ci for one run to rebuild the lockfile if needed
-        run: npm install 
+        run: npm ci # Faster and cleaner for CI
 
       - name: Build
-        # We point directly to the binary to avoid "command not found" errors
-        run: ./node_modules/.bin/vite build --base /gpu-paint/
+        # This fixes your "Permission Denied" issue
+        run: npm run build -- --base /gpu-paint/
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
