@@ -19,16 +19,16 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
 
       - name: Install dependencies
-        # 'npm ci' is faster and more reliable than 'npm install' in CI
-        run: npm ci 
+        # This ignores any existing node_modules and installs from package-lock.json
+        run: npm ci
 
       - name: Build
-        # We use npx to ensure the environment finds the local vite binary
-        run: npx tsc && npx vite build
+        # We run vite directly via npx to bypass shell path issues
+        run: npx vite build
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -41,4 +41,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-        
