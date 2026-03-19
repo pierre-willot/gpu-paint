@@ -56,11 +56,7 @@ export class SelectionManager {
 
     public get hasMask():    boolean           { return this._hasMask;    }
     public getMaskTexture(): GPUTexture | null  { return this.maskTexture; }
-
-    /** Returns the raw CPU mask bytes when a selection is active, null otherwise. */
-    public getMaskData(): Uint8Array | null {
-        return this._hasMask ? this.maskData : null;
-    }
+    public getMaskData():    Uint8Array         { return this.maskData;    }
 
     public selectAll(): void {
         this.maskData.fill(255);
@@ -87,7 +83,7 @@ export class SelectionManager {
         x: number, y: number, w: number, h: number,
         mode: SelectionMode = 'replace'
     ): void {
-        // coords are normalized 0..1 — convert to pixel space
+        // x,y,w,h are normalized 0..1 — convert to pixel space
         const px = Math.round(x * this.maskWidth);
         const py = Math.round(y * this.maskHeight);
         const pw = Math.round(w * this.maskWidth);
@@ -111,7 +107,7 @@ export class SelectionManager {
 
     // ── Public — marching ants ────────────────────────────────────────────────
 
-    public renderOverlay(targetView: GPUTextureView): void {
+    public renderOverlay(targetView: GPUTextureView, _nowMs?: number): void {
         if (!this._hasMask) return;
         if (!this.antsPipeline || !this.antsBindGroup || !this.antsUniformBuf) return;
 

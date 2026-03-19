@@ -12,7 +12,7 @@ import { RestoreBanner }        from './ui/restore-banner';
 import { GestureRecognizer }    from './input/gesture-recognizer';
 import { FocusMode }            from './ui/overlays/focus-mode';
 import { PressureCurveUI }      from './ui/panels/pressure-curve-ui';
-import { CanvasSizeDialog }     from './ui/panels/canvas-size-dialog';
+import { CanvasSizeDialog }      from './ui/panels/canvas-size-dialog';
 import './style.css';
 
 const CANVAS_LOGICAL = { width: 1000, height: 1400 };
@@ -20,13 +20,13 @@ const MAX_DPR        = 2;
 
 function measureRefreshRate(): Promise<number> {
     return new Promise(resolve => {
-        const samples: number[] = []; let last = 0;
+        const s: number[] = []; let last = 0;
         function tick(t: number) {
-            if (last > 0 && t - last < 100) samples.push(t - last);
+            if (last > 0 && t - last < 100) s.push(t - last);
             last = t;
-            if (samples.length < 10) { requestAnimationFrame(tick); return; }
-            const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
-            resolve(1000 / avg > 100 ? 120 : 1000 / avg > 75 ? 90 : 60);
+            if (s.length < 10) { requestAnimationFrame(tick); return; }
+            const avg = s.reduce((a, b) => a + b) / s.length;
+            resolve(avg < 10 ? 120 : avg < 13 ? 90 : 60);
         }
         requestAnimationFrame(tick);
     });
@@ -55,17 +55,14 @@ async function bootstrap() {
         console.info(`[GPU Paint] ${w}×${h}px · DPR=${dpr} · ${fps}Hz`);
 
         // ── App ───────────────────────────────────────────────────────────────
-        const app = new PaintApp(
-            canvas, device, context, format,
+        const app = new PaintApp(canvas, device, context, format,
             { width: CANVAS_LOGICAL.width, height: CANVAS_LOGICAL.height },
             supportsTimestamps, fps
         );
-
         app.initBrushCursor();
 
         // ── Panels ────────────────────────────────────────────────────────────
-        const panelIds = ['leftPanel', 'rightPanel', 'layerPanel', 'brushSettingsPanel', 'prefsPanel', 'exportPanel'];
-        for (const id of panelIds) {
+        for (const id of ['leftPanel','rightPanel','layerPanel','brushSettingsPanel','prefsPanel','exportPanel']) {
             const p = document.getElementById(id);
             if (p) { makeDraggable(p); addResizeHandles(p, { minW: 60, minH: 80 }); }
         }
@@ -86,7 +83,7 @@ async function bootstrap() {
         const toolbarUI = new ToolbarUI(app);
         subscribeUI(app, layerUI, toolbarUI);
 
-        // ── Brush size slider ─────────────────────────────────────────────────
+        // ── Size slider ───────────────────────────────────────────────────────
         const sizeSlider = document.getElementById('sizeSlider') as HTMLInputElement | null;
         sizeSlider?.addEventListener('input', () => {
             const size = parseFloat(sizeSlider.value);
@@ -97,13 +94,11 @@ async function bootstrap() {
         // ── Brush settings panel ──────────────────────────────────────────────
         wireBrushSettings(app);
 
-        // ── B2 — Pressure curve UI ────────────────────────────────────────────
+        // ── Pressure curve (B2) ───────────────────────────────────────────────
         const pressureContainer = document.getElementById('pressureCurveContainer');
-        if (pressureContainer) {
-            new PressureCurveUI(pressureContainer, lut => app.setPressureCurve(lut));
-        }
+        if (pressureContainer) new PressureCurveUI(pressureContainer, lut => app.setPressureCurve(lut));
 
-        // ── B11 — Canvas size dialog ──────────────────────────────────────────
+        // ── Canvas size dialog (B11) ──────────────────────────────────────────
         const sizeDialog = new CanvasSizeDialog({
             onNewCanvas:    opts => app.newCanvas(opts).then(() => app.emitLayerChange()),
             onResizeCanvas: opts => app.resizeCanvas(opts).then(() => app.emitLayerChange()),
@@ -116,29 +111,30 @@ async function bootstrap() {
         new GestureRecognizer(canvas, app.nav, {
             onUndo:        () => app.history.undo(),
             onRedo:        () => app.history.redo(),
-            onFocusToggle: () => focusMode.toggle()
+            onFocusToggle: () => focusMode.toggle(),
         });
 
         // ── Autosave ──────────────────────────────────────────────────────────
         let autosave: AutosaveManager | null = null;
         try {
-            const store = new SessionStore(); await store.open();
+            const store = new SessionStore();
+            await store.open();
             autosave = new AutosaveManager(store, status => app.bus.emit('save:status', status));
             app.connectAutosave(autosave);
             if (await store.hasSession()) {
-                const sessionData = await autosave.loadSessionData();
-                if (sessionData?.meta) {
+                const sd = await autosave.loadSessionData();
+                if (sd?.meta) {
                     new RestoreBanner(
-                        sessionData.meta.timestamp,
+                        sd.meta.timestamp,
                         async () => { const d = await autosave!.loadSessionData(); if (d) await app.restoreSession(d); },
                         async () => { await autosave!.clearSession(); }
                     );
                 }
             }
             await autosave.init(w, h);
-        } catch (err) { console.warn('[Autosave] IndexedDB unavailable:', err); }
+        } catch (err) { console.warn('[Autosave] Disabled:', err); }
 
-        // ── Menus (pass sizeDialog so File→New and Edit→Resize work) ──────────
+        // ── Menus ─────────────────────────────────────────────────────────────
         new MenuManager(app, autosave, () => toolbarUI.triggerFileInput(), sizeDialog);
 
         // ── App init ──────────────────────────────────────────────────────────
@@ -150,39 +146,30 @@ async function bootstrap() {
         window.addEventListener('keydown', async (e) => {
             const target = e.target as HTMLElement;
             if (target.isContentEditable || target.tagName === 'INPUT') return;
+            const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
 
-            const ctrl = e.ctrlKey || e.metaKey;
-            const key  = e.key.toLowerCase();
+            if (ctrl && key === 'c' && !e.shiftKey) { e.preventDefault(); await app.copy();  return; }
+            if (ctrl && key === 'x')                { e.preventDefault(); await app.cut();   return; }
+            if (ctrl && key === 'v')                { e.preventDefault(); await app.paste(); return; }
 
-            // Save / open
             if (ctrl && key === 's' && !e.shiftKey) { e.preventDefault(); await autosave?.saveNow(); return; }
-            if (ctrl && key === 's' &&  e.shiftKey) { e.preventDefault(); await app.saveProject();   return; }
+            if (ctrl && key === 's' &&  e.shiftKey) { e.preventDefault(); await app.saveProject(); return; }
             if (ctrl && key === 'o')                 { e.preventDefault(); toolbarUI.triggerFileInput(); return; }
-            if (ctrl && key === 'n')                 { e.preventDefault(); sizeDialog.openNew();     return; }
-            if (ctrl && e.altKey && key === 'c') {
-                e.preventDefault();
-                const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
-                sizeDialog.openResize(Math.round(app.pipeline.canvasWidth / dpr), Math.round(app.pipeline.canvasHeight / dpr));
-                return;
-            }
-
-            // Quick search
+            if (ctrl && key === 'n')                 { e.preventDefault(); sizeDialog.openNew(); return; }
+            if (ctrl && e.altKey && key === 'c')     { e.preventDefault();
+                const dpr = Math.min(window.devicePixelRatio||1, MAX_DPR);
+                sizeDialog.openResize(Math.round(app.pipeline.canvasWidth/dpr), Math.round(app.pipeline.canvasHeight/dpr)); return; }
             if (ctrl && key === 'k') { e.preventDefault(); document.getElementById('quickSearchBtn')?.click(); return; }
+            if (ctrl && key === 'u') { e.preventDefault(); document.getElementById('efx-hueSat')?.classList.toggle('open'); return; }
 
-            // View rotation
             if (!ctrl && key === 'r') { e.preventDefault(); app.nav.rotateBy(e.shiftKey ? -15 : 15); }
-
-            // Zoom
-            if (ctrl && (key === '=' || key === '+')) { e.preventDefault(); app.nav.zoomIn();  }
+            if (ctrl && (key === '=' || key === '+')) { e.preventDefault(); app.nav.zoomIn(); }
             if (ctrl && key === '-')                   { e.preventDefault(); app.nav.zoomOut(); }
             if (ctrl && (key === '0' || e.code === 'Numpad0')) {
                 e.preventDefault();
-                const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
-                app.nav.fitToScreen(app.pipeline.canvasWidth / dpr, app.pipeline.canvasHeight / dpr);
+                const dpr = Math.min(window.devicePixelRatio||1, MAX_DPR);
+                app.nav.fitToScreen(app.pipeline.canvasWidth/dpr, app.pipeline.canvasHeight/dpr);
             }
-
-            // Effects
-            if (ctrl && key === 'u') { e.preventDefault(); document.getElementById('efx-hueSat')?.classList.toggle('open'); }
         });
 
         // ── Drag-and-drop .gpaint ─────────────────────────────────────────────
@@ -191,7 +178,7 @@ async function bootstrap() {
             e.preventDefault();
             const file = e.dataTransfer?.files[0];
             if (!file?.name.endsWith('.gpaint')) return;
-            try { await app.openProject(await file.arrayBuffer()); }
+            try   { await app.openProject(await file.arrayBuffer()); }
             catch (err) { alert(`Failed to open: ${err instanceof Error ? err.message : err}`); }
         });
 
@@ -200,7 +187,8 @@ async function bootstrap() {
             console.warn('Attempting GPU recovery…');
             try {
                 app.bus.clear();
-                const fresh = await initGPU(canvas); fresh.canvas.width = w; fresh.canvas.height = h;
+                const fresh = await initGPU(canvas);
+                fresh.canvas.width = w; fresh.canvas.height = h;
                 await app.pipeline.reconstructFromHistory(app.history.getHistory());
                 app.pipeline.markDirty();
                 subscribeUI(app, layerUI, toolbarUI);
@@ -210,15 +198,15 @@ async function bootstrap() {
         });
 
     } catch (error) {
-        console.error('Initialization failed:', error);
+        console.error('Init failed:', error);
         document.body.innerHTML = `<div style="color:red;padding:20px"><h2>Init Failed</h2><p>${error}</p></div>`;
     }
 }
 
 function wireBrushSettings(app: PaintApp): void {
-    const bind = (sliderId: string, valId: string, suffix: string, fn: (v: number) => void) => {
-        const s = document.getElementById(sliderId) as HTMLInputElement | null;
-        const v = document.getElementById(valId)   as HTMLInputElement | null;
+    const bind = (sid: string, vid: string, suffix: string, fn: (v: number) => void) => {
+        const s = document.getElementById(sid) as HTMLInputElement | null;
+        const v = document.getElementById(vid) as HTMLInputElement | null;
         s?.addEventListener('input', () => { const n = parseInt(s.value); if (v) v.value = n + suffix; fn(n / 100); });
     };
     bind('bs-opacity',  'bs-opacity-val',  '%', v => app.setBrushOpacity(v));

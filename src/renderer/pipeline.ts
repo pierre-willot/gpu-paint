@@ -1,15 +1,14 @@
-import { createPersistentTexture }                                 from './texture';
-import { downloadTexture }                                          from '../utils/export';
+import { createPersistentTexture }             from './texture';
+import { downloadTexture }                      from '../utils/export';
 import { serializeProject, deserializeProject,
-         serializeLayeredPngs, downloadBytes }                      from '../utils/project-format';
-import { Command }                                                  from '../core/history-manager';
-import { LayerManager, LayerState, BlendMode }                     from './layer-manager';
-import { BrushRenderer, DirtyRect }                                from './brush-renderer';
-import { CompositeRenderer }                                        from './composite-renderer';
-import { CheckpointManager, Checkpoint }                           from './checkpoint-manager';
-import { SelectionManager, SelectionMode }                         from './selection-manager';
-import { EffectsPipeline }                                         from './effects-pipeline';
-import { FLOATS_PER_STAMP }                                        from './pipeline-cache';
+         serializeLayeredPngs, downloadBytes }  from '../utils/project-format';
+import { Command }                              from '../core/history-manager';
+import { LayerManager, LayerState, BlendMode }  from './layer-manager';
+import { BrushRenderer, DirtyRect }             from './brush-renderer';
+import { CompositeRenderer }                    from './composite-renderer';
+import { CheckpointManager, Checkpoint }        from './checkpoint-manager';
+import { SelectionManager, SelectionMode }      from './selection-manager';
+import { EffectsPipeline }                      from './effects-pipeline';
 
 export { SelectionMode };
 
@@ -32,15 +31,6 @@ export class PaintPipeline {
     private backingTexture:  GPUTexture;
     private needsRedraw      = true;
 
-    /**
-     * Stable reference to the current selection's CPU bytes.
-     * A new Uint8Array is allocated each time the selection changes, so
-     * strokes painted under the same selection share one object reference.
-     * The pipeline uses identity (===) during history replay to avoid
-     * redundant GPU mask uploads.
-     */
-    private _selectionSnapshot: Uint8Array | null = null;
-
     private frameDirtyRect:  DirtyRect | null = null;
     private prevOverlayRect: DirtyRect | null = null;
 
@@ -48,6 +38,7 @@ export class PaintPipeline {
     private gpuTiming:       GPUTiming | null = null;
 
     public  currentBrushSize  = 0.05;
+    /** Fill color [r,g,b,a] in 0–255 range, updated by app.setBrushColor(). */
     public  currentFillColor: [number, number, number, number] = [0, 0, 0, 255];
 
     get layers():           LayerState[] { return this.layerManager.layers;           }
@@ -85,24 +76,14 @@ export class PaintPipeline {
         if (supportsTimestamps) this.initGPUTiming();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // D3 — LIVE EFFECT PREVIEW: snapshot / restore
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── D3: snapshot / restore for live effect preview ────────────────────────
 
-    /**
-     * Reads the active layer into a CPU Uint8Array.
-     * Returns null if no active layer.
-     */
     public async snapshotActiveLayer(): Promise<Uint8Array | null> {
         const layer = this.layerManager.getActiveLayer();
         if (!layer) return null;
         return this.effectsPipeline.snapshotTexture(layer.texture);
     }
 
-    /**
-     * Writes a previously taken snapshot back to the active layer.
-     * Used by effect panels to restore the layer before re-applying.
-     */
     public restoreActiveLayer(snapshot: Uint8Array): void {
         const layer = this.layerManager.getActiveLayer();
         if (!layer) return;
@@ -110,9 +91,7 @@ export class PaintPipeline {
         this.markDirty();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // CANVAS RESIZE — B11
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Canvas resize (B11) ───────────────────────────────────────────────────
 
     public reconfigureContext(): void {
         this.context.configure({
@@ -125,11 +104,9 @@ export class PaintPipeline {
 
     public resizeInternal(physW: number, physH: number, copyContent: boolean): void {
         const oldStates = this.layers.map(l => ({
-            name:      l.name,   opacity:   l.opacity,
-            blendMode: l.blendMode, visible: l.visible,
-            locked:    l.locked,   alphaLock: l.alphaLock,
-            texture:   l.texture,
-            oldW:      l.texture.width, oldH: l.texture.height,
+            name: l.name, opacity: l.opacity, blendMode: l.blendMode,
+            visible: l.visible, locked: l.locked, alphaLock: l.alphaLock,
+            texture: l.texture, oldW: l.texture.width, oldH: l.texture.height,
         }));
         const oldActive = Math.min(this.activeLayerIndex, oldStates.length - 1);
 
@@ -140,9 +117,9 @@ export class PaintPipeline {
 
         for (const old of oldStates) {
             const layer = this.layerManager.addLayer();
-            layer.name      = old.name;      layer.opacity   = old.opacity;
-            layer.blendMode = old.blendMode; layer.visible   = old.visible;
-            layer.locked    = old.locked;    layer.alphaLock = old.alphaLock;
+            layer.name = old.name; layer.opacity = old.opacity;
+            layer.blendMode = old.blendMode; layer.visible = old.visible;
+            layer.locked = old.locked; layer.alphaLock = old.alphaLock;
 
             if (copyContent && old.texture) {
                 const cw = Math.min(old.oldW, physW), ch = Math.min(old.oldH, physH);
@@ -155,7 +132,7 @@ export class PaintPipeline {
             old.texture?.destroy();
         }
 
-        if (this.layers.length === 0) this.layerManager.addLayer();
+        if (!this.layers.length) this.layerManager.addLayer();
         this.activeLayerIndex = Math.min(oldActive, this.layers.length - 1);
 
         this.backingTexture.destroy();
@@ -164,9 +141,9 @@ export class PaintPipeline {
         this.canvasHeight = physH;
 
         this.backingTexture = this._device.createTexture({
-            size:   [physW, physH], format: this._format,
-            usage:  GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING |
-                    GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST
+            size: [physW, physH], format: this._format,
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING |
+                   GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST
         });
         this.overlayTexture = createPersistentTexture(this._device, physW, physH, this._format);
 
@@ -180,46 +157,38 @@ export class PaintPipeline {
 
     public applyBackground(pixels: Uint8Array | null, physW: number, physH: number): void {
         if (!pixels) return;
-        const layer = this.layers[0];
-        if (!layer) return;
+        const layer = this.layers[0]; if (!layer) return;
         const bpr = Math.ceil(physW * 4 / 256) * 256;
         let data  = pixels;
         if (bpr !== physW * 4) {
             data = new Uint8Array(bpr * physH);
-            for (let r = 0; r < physH; r++) data.set(pixels.subarray(r * physW * 4, r * physW * 4 + physW * 4), r * bpr);
+            for (let r = 0; r < physH; r++)
+                data.set(pixels.subarray(r * physW * 4, r * physW * 4 + physW * 4), r * bpr);
         }
         this._device.queue.writeTexture({ texture: layer.texture }, data, { bytesPerRow: bpr }, [physW, physH]);
         this.markDirty();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // SELECTION
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Selection ─────────────────────────────────────────────────────────────
 
-    public selectAll(): void       { this.selectionManager.selectAll();      this._selectionSnapshot = this.selectionManager.getMaskData()!.slice(); this.syncMask(); this.markDirty(); }
-    public deselect(): void        { this.selectionManager.deselect();       this._selectionSnapshot = null; this.syncMask(); this.markDirty(); }
-    public invertSelection(): void { this.selectionManager.invertSelection(); this._selectionSnapshot = this.selectionManager.getMaskData()?.slice() ?? null; this.syncMask(); this.markDirty(); }
+    public selectAll(): void       { this.selectionManager.selectAll();      this.syncMask(); this.markDirty(); }
+    public deselect(): void        { this.selectionManager.deselect();       this.syncMask(); this.markDirty(); }
+    public invertSelection(): void { this.selectionManager.invertSelection(); this.syncMask(); this.markDirty(); }
 
     public setRectSelection(x: number, y: number, w: number, h: number, mode: SelectionMode = 'replace'): void {
-        this.selectionManager.setRect(x, y, w, h, mode); this._selectionSnapshot = this.selectionManager.getMaskData()!.slice(); this.syncMask(); this.markDirty();
+        this.selectionManager.setRect(x, y, w, h, mode); this.syncMask(); this.markDirty();
     }
     public setLassoSelection(points: number[], mode: SelectionMode = 'replace'): void {
-        this.selectionManager.setLasso(points, mode); this._selectionSnapshot = this.selectionManager.getMaskData()!.slice(); this.syncMask(); this.markDirty();
+        this.selectionManager.setLasso(points, mode); this.syncMask(); this.markDirty();
     }
     public get hasSelection(): boolean { return this.selectionManager.hasMask; }
-
-    /** The CPU mask bytes for the current selection (null = no selection).
-     *  All strokes committed under the same selection share this reference. */
-    public get selectionSnapshot(): Uint8Array | null { return this._selectionSnapshot; }
 
     private syncMask(): void {
         const tex = this.selectionManager.hasMask ? this.selectionManager.getMaskTexture() : null;
         this.brushRenderer.setMaskTexture(tex);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // EFFECTS
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Effects ───────────────────────────────────────────────────────────────
 
     public async applyGaussianBlur(radius: number): Promise<void> {
         const layer = this.layerManager.getActiveLayer(); if (!layer) return;
@@ -233,9 +202,7 @@ export class PaintPipeline {
         this.markDirty();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // EYEDROPPER
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Eyedropper ────────────────────────────────────────────────────────────
 
     public async sampleColor(nx: number, ny: number): Promise<[number,number,number,number] | null> {
         const px  = Math.floor(Math.max(0, Math.min(1 - 1e-6, nx)) * this.canvasWidth);
@@ -248,16 +215,16 @@ export class PaintPipeline {
         const d = new Uint8Array(buf.getMappedRange());
         const [b0, b1, b2, b3] = [d[0], d[1], d[2], d[3]];
         buf.unmap(); buf.destroy();
-        if (this._format === 'bgra8unorm') return [b2/255, b1/255, b0/255, b3/255];
-        return [b0/255, b1/255, b2/255, b3/255];
+        return this._format === 'bgra8unorm'
+            ? [b2/255, b1/255, b0/255, b3/255]
+            : [b0/255, b1/255, b2/255, b3/255];
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // AUTOSAVE
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Autosave ──────────────────────────────────────────────────────────────
 
     public setCheckpointCallback(cb: (cp: Checkpoint) => Promise<void>): void { this.checkpointManager.onCheckpointSaved = cb; }
     public loadCheckpointsFromPersisted(cp: Checkpoint[]): void { this.checkpointManager.loadFromPersisted(cp); }
+
     public createCheckpointIfNeeded(len: number): void {
         this.checkpointManager.save(len, this.layers, this._device, this.canvasWidth, this.canvasHeight, this.activeLayerIndex)
             .catch(err => console.warn('[Pipeline] Checkpoint failed:', err));
@@ -265,9 +232,7 @@ export class PaintPipeline {
     public handleCommandDropped(): void           { this.checkpointManager.shiftDown();   }
     public handleRedoInvalidated(l: number): void { this.checkpointManager.pruneAbove(l); }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // DRAWING
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Drawing ───────────────────────────────────────────────────────────────
 
     public draw(stamps: Float32Array): void {
         if (!stamps.length) return;
@@ -279,7 +244,11 @@ export class PaintPipeline {
 
     public drawPrediction(stamps: Float32Array, toolIsActive: boolean): void {
         if (!toolIsActive && !stamps.length) {
-            if (this.prevOverlayRect) { this.expandDirtyRect(this.prevOverlayRect); this.prevOverlayRect = null; this.needsRedraw = true; }
+            if (this.prevOverlayRect) {
+                this.expandDirtyRect(this.prevOverlayRect);
+                this.prevOverlayRect = null;
+                this.needsRedraw = true;
+            }
             return;
         }
         this.layerManager.clearTexture(this.overlayTexture);
@@ -289,19 +258,20 @@ export class PaintPipeline {
             this.expandDirtyRect(rect);
             this.prevOverlayRect = rect;
             this.needsRedraw = true;
-        } else { this.prevOverlayRect = null; }
+        } else {
+            this.prevOverlayRect = null;
+        }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // COMPOSITING
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Compositing ───────────────────────────────────────────────────────────
 
     public composite(): void {
-        // Keep compositing every frame when a selection is active — marching ants need animation
+        // Marching ants need a redraw every frame when selection is active
         if (this.selectionManager.hasMask) this.needsRedraw = true;
 
         if (!this.needsRedraw) return;
         this.needsRedraw = false;
+
         const cur = this.context.getCurrentTexture(); if (!cur) return;
         const scissor = this.frameDirtyRect; this.frameDirtyRect = null;
 
@@ -311,7 +281,9 @@ export class PaintPipeline {
             this.compositeRenderer.render(this.backingTexture.createView(), this.layers, this.overlayTexture, scissor);
         }
 
-        if (this.selectionManager.hasMask) this.selectionManager.renderOverlay(this.backingTexture.createView(), performance.now());
+        if (this.selectionManager.hasMask) {
+            this.selectionManager.renderOverlay(this.backingTexture.createView(), performance.now());
+        }
 
         const enc = this._device.createCommandEncoder();
         enc.copyTextureToTexture({ texture: this.backingTexture }, { texture: cur }, [this.canvasWidth, this.canvasHeight]);
@@ -323,90 +295,86 @@ export class PaintPipeline {
         this.expandDirtyRect(this.fullCanvasRect());
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // COMMANDS
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Commands ──────────────────────────────────────────────────────────────
 
     public applyCommand(cmd: Command): void {
         if (cmd.type === 'add-layer') {
-            this.layerManager.addLayer(); this.expandDirtyRect(this.fullCanvasRect());
+            this.layerManager.addLayer();
+            this.expandDirtyRect(this.fullCanvasRect());
         } else if (cmd.type === 'delete-layer') {
-            this.layerManager.removeLayer(cmd.layerIndex); this.expandDirtyRect(this.fullCanvasRect());
+            this.layerManager.removeLayer(cmd.layerIndex);
+            this.expandDirtyRect(this.fullCanvasRect());
         } else if (cmd.type === 'stroke') {
             this.activeLayerIndex = cmd.layerIndex;
             const layer = this.layerManager.getActiveLayer();
             if (layer) {
                 this.brushRenderer.setConfig({ blendMode: cmd.blendMode });
-                const rect = this.brushRenderer.draw(cmd.stamps, layer.texture);
+                this.expandDirtyRect(this.brushRenderer.draw(cmd.stamps, layer.texture));
                 this.brushRenderer.setConfig({ blendMode: 'normal' });
-                this.expandDirtyRect(rect);
             }
+        } else if (cmd.type === 'selection') {
+            // Selection was already applied directly by SelectionTool for immediate
+            // visual feedback. applyCommand is only called for new commands (not
+            // replay), so we skip double-applying here. syncMask() is already done
+            // by the pipeline.setRectSelection/setLassoSelection/deselect calls
+            // made by the tool. We just ensure dirty flag is set.
+            this.expandDirtyRect(this.fullCanvasRect());
+        } else if (cmd.type === 'cut') {
+            // Cut was already applied to the GPU texture before pushing to history.
+            // Just mark dirty to trigger recomposite.
+            this.expandDirtyRect(this.fullCanvasRect());
+        } else if (cmd.type === 'paste') {
+            const layer = this.layerManager.addLayer();
+            layer.name  = 'Pasted Layer';
+            this.effectsPipeline.restoreTexture(layer.texture, cmd.pixels);
+            this.expandDirtyRect(this.fullCanvasRect());
         }
         this.needsRedraw = true;
     }
 
     public async reconstructFromHistory(history: Command[]): Promise<void> {
-        // Clear the brush renderer's mask before replay. Each stroke command
-        // carries the selection that was live when it was painted; we apply
-        // that mask only for the duration of its own draw call, so pre-selection
-        // strokes are never incorrectly clipped by a later selection.
-        let replayMaskData: Uint8Array | null = undefined as any; // sentinel — forces first upload
-        let replayMaskTex:  GPUTexture | null = null;
+        // Clear selection mask from brush renderer before replaying —
+        // strokes recorded before a selection was made must not be clipped by it.
+        this.brushRenderer.setMaskTexture(null);
 
-        const applyReplayMask = (cmd: Command) => {
-            if (cmd.type !== 'stroke') return;
-            const mask = cmd.selectionMask ?? null;
-            if (mask === replayMaskData) return; // same reference — no re-upload needed
-            replayMaskTex?.destroy();
-            replayMaskData = mask;
-            if (mask) {
-                replayMaskTex = this.createTempMaskTexture(mask);
-                this.brushRenderer.setMaskTexture(replayMaskTex);
-            } else {
-                replayMaskTex = null;
-                this.brushRenderer.setMaskTexture(null);
-            }
-        };
-
-        const checkpoint = this.checkpointManager.findNearest(history.length);
-        if (checkpoint) {
-            await this.checkpointManager.restore(checkpoint, this.layerManager, this._device, this.canvasWidth, this.canvasHeight);
-            for (const cmd of history.slice(checkpoint.stackLength)) { applyReplayMask(cmd); this.replayCommand(cmd); }
+        const cp = this.checkpointManager.findNearest(history.length);
+        if (cp) {
+            await this.checkpointManager.restore(cp, this.layerManager, this._device, this.canvasWidth, this.canvasHeight);
+            for (const cmd of history.slice(cp.stackLength)) this.replayCommand(cmd);
         } else {
             this.layerManager.destroyAll();
-            for (const cmd of history) { applyReplayMask(cmd); this.replayCommand(cmd); }
+            for (const cmd of history) this.replayCommand(cmd);
         }
-
-        replayMaskTex?.destroy();
         this.brushRenderer.setConfig({ blendMode: 'normal' });
+        // Re-sync mask after replay — selection is preserved across undo/redo
+        this.syncMask();
         if (!this.layers.length) this.layerManager.addLayer();
         this.activeLayerIndex = Math.min(this.activeLayerIndex, this.layers.length - 1);
         this.frameDirtyRect   = this.fullCanvasRect();
         this.needsRedraw      = true;
-        this.syncMask(); // restore the live selection after replay
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // LAYER PROXIES
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Layer proxies ─────────────────────────────────────────────────────────
 
-    public setLayerOpacity(i: number, v: number): void   { this.layerManager.setOpacity(i, v);    this.markDirty(); }
-    public setLayerBlendMode(i: number, m: BlendMode): void { this.layerManager.setBlendMode(i, m); this.markDirty(); }
-    public setLayerVisible(i: number, v: boolean): void  { this.layerManager.setVisible(i, v);    this.markDirty(); }
-    public setLayerName(i: number, n: string): void      { this.layerManager.setName(i, n);                        }
-    public setLayerLock(i: number, v: boolean): void     { this.layerManager.setLocked(i, v);                      }
-    public setLayerAlphaLock(i: number, v: boolean): void{ this.layerManager.setAlphaLock(i, v);                   }
-    public reorderLayer(f: number, t: number): void      { this.layerManager.reorderLayer(f, t);  this.markDirty(); }
+    public setLayerOpacity(i: number, v: number): void      { this.layerManager.setOpacity(i, v);    this.markDirty(); }
+    public setLayerBlendMode(i: number, m: BlendMode): void  { this.layerManager.setBlendMode(i, m);  this.markDirty(); }
+    public setLayerVisible(i: number, v: boolean): void      { this.layerManager.setVisible(i, v);    this.markDirty(); }
+    public setLayerName(i: number, n: string): void          { this.layerManager.setName(i, n);                        }
+    public setLayerLock(i: number, v: boolean): void         { this.layerManager.setLocked(i, v);                      }
+    public setLayerAlphaLock(i: number, v: boolean): void    { this.layerManager.setAlphaLock(i, v);                   }
+    public reorderLayer(f: number, t: number): void          { this.layerManager.reorderLayer(f, t);  this.markDirty(); }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // UTILITIES
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Utilities ─────────────────────────────────────────────────────────────
 
-    public clear(): void { this.layerManager.clearLayer(this.activeLayerIndex); this.markDirty(); }
+    public clear(): void {
+        this.layerManager.clearLayer(this.activeLayerIndex); this.markDirty();
+    }
 
     public updateUniforms(w: number, h: number, size: number): void {
-        this.currentBrushSize = size; this.canvasWidth = w; this.canvasHeight = h;
-        this.brushRenderer.updateResolution(w, h); this.markDirty();
+        this.currentBrushSize = size;
+        this.canvasWidth = w; this.canvasHeight = h;
+        this.brushRenderer.updateResolution(w, h);
+        this.markDirty();
     }
 
     public async saveImage(): Promise<void> {
@@ -419,58 +387,44 @@ export class PaintPipeline {
     }
 
     public async saveProject(filename = 'artwork.gpaint'): Promise<void> {
-        downloadBytes(await serializeProject(this._device, this.layers, this.activeLayerIndex, this.canvasWidth, this.canvasHeight, this._format), filename);
+        downloadBytes(await serializeProject(
+            this._device, this.layers, this.activeLayerIndex,
+            this.canvasWidth, this.canvasHeight, this._format
+        ), filename);
     }
 
     public async loadProject(zipBytes: Uint8Array): Promise<void> {
         const { manifest, bitmaps } = await deserializeProject(zipBytes);
-        this.layerManager.destroyAll(); this.selectionManager.deselect(); this.syncMask();
+        this.layerManager.destroyAll();
+        this.selectionManager.deselect(); this.syncMask();
+
         for (let i = 0; i < manifest.layers.length; i++) {
-            const meta = manifest.layers[i]; const layer = this.layerManager.addLayer();
-            await this.bitmapToTexture(bitmaps[i], layer.texture); bitmaps[i].close();
+            const meta  = manifest.layers[i];
+            const layer = this.layerManager.addLayer();
+            await this.bitmapToTexture(bitmaps[i], layer.texture);
+            bitmaps[i].close();
             layer.name = meta.name; layer.opacity = meta.opacity;
             layer.blendMode = meta.blendMode as BlendMode; layer.visible = meta.visible;
         }
         this.activeLayerIndex = Math.min(manifest.activeLayerIndex, this.layers.length - 1);
-        this.frameDirtyRect = this.fullCanvasRect(); this.needsRedraw = true;
+        this.frameDirtyRect   = this.fullCanvasRect();
+        this.needsRedraw      = true;
     }
 
     public async exportLayersZip(filename = 'layers.zip'): Promise<void> {
-        downloadBytes(await serializeLayeredPngs(this._device, this.layers, this.canvasWidth, this.canvasHeight, this._format), filename);
+        downloadBytes(await serializeLayeredPngs(
+            this._device, this.layers, this.canvasWidth, this.canvasHeight, this._format
+        ), filename);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // PRIVATE
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Creates a transient R8Unorm GPU texture from raw CPU mask bytes.
-     * Used only during history replay — caller is responsible for destroying it.
-     */
-    private createTempMaskTexture(data: Uint8Array): GPUTexture {
-        const w   = this.canvasWidth;
-        const h   = this.canvasHeight;
-        const bpr = Math.ceil(w / 256) * 256;
-        const tex = this._device.createTexture({
-            size:   [w, h],
-            format: 'r8unorm',
-            usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-        });
-        let upload = data;
-        if (bpr !== w) {
-            upload = new Uint8Array(bpr * h);
-            for (let row = 0; row < h; row++) {
-                upload.set(data.subarray(row * w, row * w + w), row * bpr);
-            }
-        }
-        this._device.queue.writeTexture({ texture: tex }, upload, { bytesPerRow: bpr }, [w, h]);
-        return tex;
-    }
+    // ── Private ───────────────────────────────────────────────────────────────
 
     private replayCommand(cmd: Command): void {
-        if (cmd.type === 'add-layer') { this.layerManager.addLayer(); }
-        else if (cmd.type === 'delete-layer') { this.layerManager.removeLayer(cmd.layerIndex); }
-        else if (cmd.type === 'stroke') {
+        if (cmd.type === 'add-layer') {
+            this.layerManager.addLayer();
+        } else if (cmd.type === 'delete-layer') {
+            this.layerManager.removeLayer(cmd.layerIndex);
+        } else if (cmd.type === 'stroke') {
             this.activeLayerIndex = cmd.layerIndex;
             const layer = this.layerManager.getActiveLayer();
             if (layer) {
@@ -478,30 +432,69 @@ export class PaintPipeline {
                 this.brushRenderer.draw(cmd.stamps, layer.texture);
                 this.brushRenderer.setConfig({ blendMode: 'normal' });
             }
+        } else if (cmd.type === 'selection') {
+            // Update selectionManager state only — syncMask() called after all commands replayed
+            this.applySelectionCommand(cmd);
+        } else if (cmd.type === 'cut') {
+            const layer = this.layerManager.layers[cmd.layerIndex];
+            if (layer) this.effectsPipeline.restoreTexture(layer.texture, cmd.pixels);
+        } else if (cmd.type === 'paste') {
+            const layer = this.layerManager.addLayer();
+            layer.name  = 'Pasted Layer';
+            this.effectsPipeline.restoreTexture(layer.texture, cmd.pixels);
+        }
+    }
+
+    private applySelectionCommand(cmd: Extract<Command, { type: 'selection' }>): void {
+        switch (cmd.operation) {
+            case 'rect':
+                this.selectionManager.setRect(cmd.x ?? 0, cmd.y ?? 0, cmd.w ?? 0, cmd.h ?? 0, cmd.selMode as any);
+                break;
+            case 'lasso':
+                if (cmd.points && cmd.points.length >= 6)
+                    this.selectionManager.setLasso(cmd.points, cmd.selMode as any);
+                break;
+            case 'selectAll':
+                this.selectionManager.selectAll();
+                break;
+            case 'deselect':
+                this.selectionManager.deselect();
+                break;
+            case 'invertSelection':
+                this.selectionManager.invertSelection();
+                break;
         }
     }
 
     private async bitmapToTexture(bitmap: ImageBitmap, texture: GPUTexture): Promise<void> {
-        this._device.queue.copyExternalImageToTexture({ source: bitmap }, { texture, premultipliedAlpha: true }, [Math.min(bitmap.width, texture.width), Math.min(bitmap.height, texture.height)]);
+        this._device.queue.copyExternalImageToTexture(
+            { source: bitmap }, { texture, premultipliedAlpha: true },
+            [Math.min(bitmap.width, texture.width), Math.min(bitmap.height, texture.height)]
+        );
         await this._device.queue.onSubmittedWorkDone();
     }
 
     private expandDirtyRect(rect: DirtyRect | null): void {
         if (!rect) return;
         if (!this.frameDirtyRect) { this.frameDirtyRect = { ...rect }; return; }
-        if (!this.frameDirtyRect.x && !this.frameDirtyRect.y && this.frameDirtyRect.width === this.canvasWidth && this.frameDirtyRect.height === this.canvasHeight) return;
-        const x1 = Math.min(this.frameDirtyRect.x, rect.x), y1 = Math.min(this.frameDirtyRect.y, rect.y);
-        const x2 = Math.max(this.frameDirtyRect.x + this.frameDirtyRect.width, rect.x + rect.width);
+        if (!this.frameDirtyRect.x && !this.frameDirtyRect.y &&
+            this.frameDirtyRect.width === this.canvasWidth &&
+            this.frameDirtyRect.height === this.canvasHeight) return;
+        const x1 = Math.min(this.frameDirtyRect.x, rect.x);
+        const y1 = Math.min(this.frameDirtyRect.y, rect.y);
+        const x2 = Math.max(this.frameDirtyRect.x + this.frameDirtyRect.width,  rect.x + rect.width);
         const y2 = Math.max(this.frameDirtyRect.y + this.frameDirtyRect.height, rect.y + rect.height);
         this.frameDirtyRect = { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
     }
 
-    private fullCanvasRect(): DirtyRect { return { x: 0, y: 0, width: this.canvasWidth, height: this.canvasHeight }; }
+    private fullCanvasRect(): DirtyRect {
+        return { x: 0, y: 0, width: this.canvasWidth, height: this.canvasHeight };
+    }
 
     private initGPUTiming(): void {
         const querySet    = this._device.createQuerySet({ type: 'timestamp', count: 2 });
         const queryBuffer = this._device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
-        const readBuffer  = this._device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        const readBuffer  = this._device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST    | GPUBufferUsage.MAP_READ  });
         this.gpuTiming    = { querySet, queryBuffer, readBuffer, pending: false };
     }
 

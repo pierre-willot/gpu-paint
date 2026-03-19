@@ -1,9 +1,6 @@
 import type { BrushBlendMode } from '../renderer/brush-descriptor';
 
-// ── Command type ──────────────────────────────────────────────────────────────
-// timestamp: ms since session start via history.now().
-// Used by TimelapseRecorder for replay at correct relative speed.
-// Old sessions without timestamp are patched to 0 in restoreUndoStack().
+export type SelectionOperation = 'rect' | 'lasso' | 'selectAll' | 'deselect' | 'invertSelection';
 
 export type Command =
     | {
@@ -14,30 +11,45 @@ export type Command =
         blendMode:      BrushBlendMode;
         floatsPerStamp: number;
         timestamp:      number;
-        /**
-         * Snapshot of the CPU selection mask that was active when this stroke
-         * was committed. null = no selection (paint everywhere).
-         *
-         * Strokes painted under the same selection share the SAME Uint8Array
-         * reference — the pipeline uses identity comparison (===) during replay
-         * to avoid redundant GPU uploads.
-         */
-        selectionMask:  Uint8Array | null;
       }
     | { type: 'add-layer';    label: 'Add Layer' | 'Initial Layer'; layerIndex: number; timestamp: number; }
-    | { type: 'delete-layer'; label: 'Delete Layer';                layerIndex: number; timestamp: number; };
-
-// ── Constants ─────────────────────────────────────────────────────────────────
+    | { type: 'delete-layer'; label: 'Delete Layer';                layerIndex: number; timestamp: number; }
+    | {
+        type:      'selection';
+        label:     'Selection';
+        operation: SelectionOperation;
+        selMode:   string;
+        x?:        number;
+        y?:        number;
+        w?:        number;
+        h?:        number;
+        points?:   number[];
+        timestamp: number;
+      }
+    | {
+        type:       'cut';
+        label:      'Cut';
+        layerIndex: number;
+        pixels:     Uint8Array;   // full layer RGBA after cut (masked region zeroed)
+        timestamp:  number;
+      }
+    | {
+        type:      'paste';
+        label:     'Paste';
+        pixels:    Uint8Array;   // full layer RGBA for the new pasted layer
+        timestamp: number;
+      };
 
 const MAX_HISTORY_COUNT   = 200;
 const MAX_HISTORY_BYTES   = 128 * 1024 * 1024;
 const CHECKPOINT_INTERVAL = 10;
 
 function commandBytes(cmd: Command): number {
-    return cmd.type === 'stroke' ? cmd.stamps.byteLength : 0;
+    if (cmd.type === 'stroke') return cmd.stamps.byteLength;
+    if (cmd.type === 'cut')    return cmd.pixels.byteLength;
+    if (cmd.type === 'paste')  return cmd.pixels.byteLength;
+    return 0;
 }
-
-// ── Options ───────────────────────────────────────────────────────────────────
 
 export interface HistoryManagerOptions {
     onCheckpointNeeded?:     (stackLength: number) => void;
@@ -47,8 +59,6 @@ export interface HistoryManagerOptions {
     onCommandUndone?:        () => void;
     onCommandRedone?:        () => void;
 }
-
-// ── HistoryManager ────────────────────────────────────────────────────────────
 
 export class HistoryManager {
     private undoStack:        Command[] = [];
@@ -62,10 +72,7 @@ export class HistoryManager {
         private options:      HistoryManagerOptions = {}
     ) {}
 
-    /**
-     * Returns milliseconds elapsed since this HistoryManager was created.
-     * Used to stamp outgoing commands with a session-relative timestamp.
-     */
+    /** ms since session start — stamp every outgoing command with this. */
     public now(): number {
         return performance.now() - this.sessionStartTime;
     }
@@ -75,7 +82,7 @@ export class HistoryManager {
         this.totalBytes += commandBytes(command);
 
         if (this.redoStack.length > 0) {
-            this.redoStack.forEach(cmd => { this.totalBytes -= commandBytes(cmd); });
+            this.redoStack.forEach(c => { this.totalBytes -= commandBytes(c); });
             this.redoStack = [];
             this.options.onRedoInvalidated?.(this.undoStack.length);
         }
@@ -116,20 +123,16 @@ export class HistoryManager {
         await this.onReplay(this.undoStack);
     }
 
-    /**
-     * Rebuilds the undo stack from persisted data without firing any hooks.
-     * Patches missing timestamp fields to 0 for backward compatibility.
-     */
+    /** Rebuilds the undo stack from persisted data without firing hooks.
+     *  Patches missing timestamp fields to 0 for backward compatibility. */
     public restoreUndoStack(commands: Command[]): void {
-        this.undoStack  = commands.map(cmd =>
-            'timestamp' in cmd ? cmd : { ...cmd, timestamp: 0 } as Command
-        );
+        this.undoStack  = commands.map(c => ('timestamp' in c ? c : { ...c, timestamp: 0 }) as Command);
         this.redoStack  = [];
         this.totalBytes = commands.reduce((s, c) => s + commandBytes(c), 0);
     }
 
-    public canUndo():  boolean    { return this.undoStack.length > 1;  }
-    public canRedo():  boolean    { return this.redoStack.length > 0;  }
-    public getHistory(): Command[] { return this.undoStack;             }
-    public get memoryBytes(): number { return this.totalBytes;          }
+    public canUndo():  boolean     { return this.undoStack.length > 1; }
+    public canRedo():  boolean     { return this.redoStack.length > 0; }
+    public getHistory(): Command[] { return this.undoStack;            }
+    public get memoryBytes(): number { return this.totalBytes;         }
 }

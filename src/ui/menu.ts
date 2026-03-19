@@ -21,6 +21,9 @@ const SEARCH_ITEMS = [
     { name: 'Selection',        sc: 'M'         },
     { name: 'Undo',             sc: '⌘Z'        },
     { name: 'Redo',             sc: '⇧⌘Z'       },
+    { name: 'Copy',             sc: '⌘C'        },
+    { name: 'Cut',              sc: '⌘X'        },
+    { name: 'Paste',            sc: '⌘V'        },
     { name: 'Save Session',     sc: '⌘S'        },
     { name: 'Save As .gpaint',  sc: '⇧⌘S'       },
     { name: 'Export PNG',       sc: '⇧⌘E'       },
@@ -125,9 +128,12 @@ export class MenuManager {
     private wireEditMenu(): void {
         this.on('menu-undo',        () => this.app.history.undo());
         this.on('menu-redo',        () => this.app.history.redo());
-        this.on('menu-select-all',  () => this.app.pipeline.selectAll());
-        this.on('menu-deselect',    () => this.app.pipeline.deselect());
-        this.on('menu-invert-sel',  () => this.app.pipeline.invertSelection());
+        this.on('menu-copy',        () => this.app.copy());
+        this.on('menu-cut',         () => this.app.cut());
+        this.on('menu-paste',       () => this.app.paste());
+        this.on('menu-select-all',  () => this.app.selectAll());
+        this.on('menu-deselect',    () => this.app.deselect());
+        this.on('menu-invert-sel',  () => this.app.invertSelection());
         this.on('menu-clear',       () => this.app.clearLayer());
         document.getElementById('menu-resize')?.addEventListener('click', () => {
             this.closeAll();
@@ -378,7 +384,7 @@ export class MenuManager {
         // Escape key — deselect and return to brush
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && this.app.selectionTool === (this.app as any).activeTool) {
-                this.app.pipeline.deselect();
+                this.app.deselect();
                 this.app.setTool(this.app.brushTool);
             }
         });

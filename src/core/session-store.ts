@@ -31,10 +31,11 @@ export interface StoredCommandRecord {
     seq:             number;          // IDB key — monotonic, never reused
     type:            string;
     label:           string;
-    layerIndex:      number;
+    layerIndex?:     number;          // not present on paste/selection commands
     blendMode?:      string;          // stroke only
     floatsPerStamp?: number;          // stroke only
     stampsBuffer?:   ArrayBuffer;     // stroke only — Float32Array.buffer slice
+    pixelsBuffer?:   ArrayBuffer;     // cut/paste — Uint8Array.buffer slice
 }
 
 export interface StoredCheckpointRecord {

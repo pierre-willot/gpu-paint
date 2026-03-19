@@ -1,479 +1,533 @@
-import { PaintPipeline }              from "../renderer/pipeline";
-import { HistoryManager }             from "./history-manager";
-import { NavigationManager }          from "../input/navigation";
-import { setupPointer }               from "../input/pointer";
-import { Tool }                       from "./tool";
-import { BaseTool }                   from "./tools/base-tool";
-import { BrushTool }                  from "./tools/brush-tool";
-import { EraserTool }                 from "./tools/eraser-tool";
-import { EventBus }                   from "./event-bus";
-import { PressureCurve, PressureCurvePreset, PRESSURE_PRESETS } from "../renderer/pressure-curve";
-import { FLOATS_PER_STAMP }           from "../renderer/pipeline-cache";
+import { PaintPipeline }                          from '../renderer/pipeline';
+import { HistoryManager }                          from './history-manager';
+import { NavigationManager }                       from '../input/navigation';
+import { setupPointer }                            from '../input/pointer';
+import { Tool }                                    from './tool';
+import { BaseTool }                                from './tools/base-tool';
+import { BrushTool }                               from './tools/brush-tool';
+import { EraserTool }                              from './tools/eraser-tool';
+import { EyedropperTool }                          from './tools/eyedropper-tool';
+import { FillTool }                                from './tools/fill-tool';
+import { SelectionTool }                           from './tools/selection-tool';
+import { EventBus }                                from './event-bus';
+import { AutosaveManager, recordToCommand, recordToCheckpoint } from './autosave-manager';
+import { PressureCurve, PRESSURE_PRESETS }         from '../renderer/pressure-curve';
+import { FLOATS_PER_STAMP }                        from '../renderer/pipeline-cache';
+import { BrushCursor }                             from '../ui/overlays/brush-cursor';
+import { generateBackground, CanvasSizeOptions }   from '../ui/panels/canvas-size-dialog';
 
-const IDLE_CLEAR_FRAMES = 10;
-
-// ── Palm rejection ────────────────────────────────────────────────────────────
-// A touch contact area above this threshold (in CSS pixels²) is treated as a
-// palm and rejected. Apple Pencil contacts are ~1-4 px², palm contacts are
-// typically 2000-20000 px² depending on how the hand rests.
-// 400 px² is a conservative threshold that won't reject intentional touches
-// from fingertip drawing but will reliably catch palm rests.
+const IDLE_CLEAR_FRAMES   = 10;
 const PALM_AREA_THRESHOLD = 400;
+const HEADER_H            = 52;
+const MAX_DPR             = 2;
 
-// ── Queued pointer event ──────────────────────────────────────────────────────
-interface QueuedMove {
-    x: number; y: number; pressure: number;
-    tiltX: number; tiltY: number;
-}
+interface QueuedMove { x: number; y: number; pressure: number; tiltX: number; tiltY: number; }
 
 export class PaintApp {
-    public  pipeline:    PaintPipeline;
-    public  history:     HistoryManager;
-    public  nav:         NavigationManager;
-    public  readonly bus = new EventBus();
+    public  pipeline:       PaintPipeline;
+    public  history:        HistoryManager;
+    public  nav:            NavigationManager;
+    public  readonly bus    = new EventBus();
+    public  autosave!:      AutosaveManager;
 
-    private activeTool:  Tool;
-    public  brushTool:   BrushTool;
-    public  eraserTool:  EraserTool;
+    private _activeTool:    Tool;
+    public  brushTool:      BrushTool;
+    public  eraserTool:     EraserTool;
+    public  eyedropperTool: EyedropperTool;
+    public  fillTool:       FillTool;
+    public  selectionTool:  SelectionTool;
 
-    private cachedRect:  DOMRect | null = null;
+    private brushCursor:    BrushCursor | null = null;
+    private clipboard:      { pixels: Uint8Array } | null = null;
 
-    private lastFrameTime:  number = 0;
-    private lastFrameDelta: number = 16.6;
-    private idleFrameCount: number = 0;
-
+    private lastFrameTime   = 0;
+    private lastFrameDelta  = 16.6;
+    private idleFrameCount  = 0;
     private readonly budgetMs: number;
 
-    // ── Pointer event buffer (Safari compatibility) ───────────────────────────
     private pointerMoveQueue: QueuedMove[] = [];
-    private isPointerDown:    boolean      = false;
-    // Track the active pointer ID so we can reject a simultaneous palm touch
-    // that starts while a stroke is in progress.
+    private isPointerDown     = false;
     private activePointerId:  number | null = null;
 
-    // ── Pressure curve ────────────────────────────────────────────────────────
-    // One PressureCurve instance shared by all tools.
-    // The LUT is re-sent to each tool's worker whenever the curve changes.
-    private pressureCurve: PressureCurve;
-
-    // ── Render loop error boundary ────────────────────────────────────────────
-    private renderErrorCount:  number  = 0;
+    private pressureCurve:  PressureCurve;
+    private renderErrorCount  = 0;
+    private renderLoopStopped = false;
     private readonly MAX_RENDER_ERRORS = 3;
-    private renderLoopStopped: boolean = false;
 
     constructor(
-        private canvas:          HTMLCanvasElement,
-        device:                  GPUDevice,
-        context:                 GPUCanvasContext,
-        format:                  GPUTextureFormat,
-        private canvasSize:      { width: number; height: number },
-        supportsTimestamps:      boolean = false,
-        fps:                     number  = 60
+        private canvas:     HTMLCanvasElement,
+        device:             GPUDevice,
+        context:            GPUCanvasContext,
+        format:             GPUTextureFormat,
+        private canvasSize: { width: number; height: number },
+        supportsTimestamps  = false,
+        fps                 = 60
     ) {
-        this.budgetMs     = (1000 / fps) * 0.85;
+        this.budgetMs      = (1000 / fps) * 0.85;
         this.pressureCurve = new PressureCurve(PRESSURE_PRESETS.natural);
 
-        console.info(`[PaintApp] Frame budget: ${this.budgetMs.toFixed(1)}ms (${fps}Hz)`);
-
-        this.pipeline = new PaintPipeline(
-            device, context, format,
-            canvas.width, canvas.height,
-            supportsTimestamps
-        );
-
-        this.nav = new NavigationManager(canvas, () => this.updateCanvasTransform());
+        this.pipeline = new PaintPipeline(device, context, format, canvas.width, canvas.height, supportsTimestamps);
+        this.nav      = new NavigationManager(canvas, () => this.updateCanvasTransform());
 
         this.history = new HistoryManager(
-            async (cmd) => {
-                this.pipeline.applyCommand(cmd);
-                this.pipeline.markDirty();
-                this.emitStateChange();
-            },
-            async (log) => {
-                await this.pipeline.reconstructFromHistory(log);
-                this.pipeline.markDirty();
-                this.emitStateChange();
-            },
+            async cmd  => { this.pipeline.applyCommand(cmd); this.pipeline.markDirty(); this.emitStateChange(); },
+            async log  => { await this.pipeline.reconstructFromHistory(log); this.pipeline.markDirty(); this.emitStateChange(); },
             {
-                onCheckpointNeeded:     (len) => this.pipeline.createCheckpointIfNeeded(len),
-                onOldestCommandDropped: ()    => this.pipeline.handleCommandDropped(),
-                onRedoInvalidated:      (len) => this.pipeline.handleRedoInvalidated(len)
+                onCheckpointNeeded:     len => this.pipeline.createCheckpointIfNeeded(len),
+                onOldestCommandDropped: ()  => { this.pipeline.handleCommandDropped();      this.autosave?.onCommandDropped();  },
+                onRedoInvalidated:      len => { this.pipeline.handleRedoInvalidated(len); this.autosave?.onRedoInvalidated(); },
+                onCommandAppended:      cmd => this.autosave?.onCommandAppended(cmd),
+                onCommandUndone:        ()  => this.autosave?.onCommandUndone(),
+                onCommandRedone:        ()  => this.autosave?.onCommandRedone(),
             }
         );
 
-        this.brushTool  = new BrushTool(this.bus);
-        this.eraserTool = new EraserTool();
+        this.brushTool      = new BrushTool();
+        this.eraserTool     = new EraserTool();
+        this.eyedropperTool = new EyedropperTool(this.pipeline, this.bus);
+        this.fillTool       = new FillTool();
+        this.selectionTool  = new SelectionTool(canvas);
+
+        this.selectionTool.screenToCanvas = (cx, cy) => this.translatePoint(cx, cy);
+        this.selectionTool.canvasToScreen = (nx, ny)  => this.canvasToScreen(nx, ny);
 
         this.wireTool(this.brushTool);
         this.wireTool(this.eraserTool);
-        this.activeTool = this.brushTool;
+        this._activeTool = this.brushTool;
 
-        // Push initial pressure LUT to both tool workers
         this.pushPressureLUT();
-
-        new ResizeObserver(() => { this.cachedRect = null; }).observe(this.canvas);
         this.setupInputs();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // INIT
-    // ─────────────────────────────────────────────────────────────────────────
+    // Expose active tool name for bus sync
+    public get activeToolName(): string { return this._activeTool.constructor.name; }
 
-    public async init() {
-        await this.history.execute({
-            type: 'add-layer', label: 'Initial Layer', layerIndex: 0
-        });
+    // ── Brush cursor ──────────────────────────────────────────────────────────
+
+    public initBrushCursor(): void {
+        this.brushCursor = new BrushCursor(
+            this.canvas,
+            () => this.canvasSize.width * this.nav.state.zoom
+        );
+        this.brushCursor.setSize(this.brushTool.getDescriptor().size);
+        this.brushCursor.show();
+    }
+
+    // ── Autosave ──────────────────────────────────────────────────────────────
+
+    public connectAutosave(manager: AutosaveManager): void {
+        this.autosave = manager;
+        this.pipeline.setCheckpointCallback(cp => manager.onCheckpointCreated(cp));
+        manager.start();
+    }
+
+    // ── Session restore ───────────────────────────────────────────────────────
+
+    public async restoreSession(
+        sessionData: Awaited<ReturnType<AutosaveManager['loadSessionData']>>
+    ): Promise<void> {
+        if (!sessionData) return;
+        const { meta, commands: records, checkpoints: cpRecords } = sessionData;
+        const checkpoints = cpRecords
+            .map(r => recordToCheckpoint(r, meta.checkpointStackOffset))
+            .filter(cp => cp.stackLength > 0);
+        this.pipeline.loadCheckpointsFromPersisted(checkpoints);
+        const commands = records.map(recordToCommand);
+        this.history.restoreUndoStack(commands);
+        await this.pipeline.reconstructFromHistory(commands);
+        this.pipeline.markDirty();
+        const seqStack = records.map(r => r.seq);
+        this.autosave.restoreState(seqStack, Math.max(...seqStack, -1) + 1);
+        this.emitStateChange();
+    }
+
+    // ── Project ───────────────────────────────────────────────────────────────
+
+    public async openProject(bytes: ArrayBuffer): Promise<void> {
+        await this.pipeline.loadProject(new Uint8Array(bytes));
+        this.history.restoreUndoStack([]);
+        await this.autosave?.clearSession();
+        this.pipeline.markDirty();
+        this.emitStateChange();
+    }
+    public async saveProject(f?: string): Promise<void>     { await this.pipeline.saveProject(f);     }
+    public async exportLayersZip(f?: string): Promise<void> { await this.pipeline.exportLayersZip(f); }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+
+    public async init(): Promise<void> {
+        await this.history.execute({ type: 'add-layer', label: 'Initial Layer', layerIndex: 0, timestamp: this.history.now() });
+        this.updateCanvasTransform();
         this.renderLoop(performance.now());
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // TOOL MANAGEMENT
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Canvas size (B11) ─────────────────────────────────────────────────────
 
-    public setTool(tool: Tool) {
-        this.activeTool.reset(this.pipeline);
-        this.activeTool = tool;
-        this.bus.emit('tool:change', { tool: tool.constructor.name });
+    public async newCanvas(opts: CanvasSizeOptions): Promise<void> {
+        const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+        const physW = opts.width * dpr, physH = opts.height * dpr;
+        this.canvas.width = physW; this.canvas.height = physH;
+        this.pipeline.reconfigureContext();
+        this.pipeline.resizeInternal(physW, physH, false);
+        this.pipeline.applyBackground(generateBackground(physW, physH, opts.bgType, opts.bgColor, opts.noise), physW, physH);
+        this.canvasSize = { width: opts.width, height: opts.height };
+        this.history.restoreUndoStack([]);
+        await this.autosave?.clearSession();
+        await this.history.execute({ type: 'add-layer', label: 'Initial Layer', layerIndex: 0, timestamp: this.history.now() });
+        this.nav.fitToScreen(opts.width, opts.height);
+        this.pipeline.updateUniforms(physW, physH, this.pipeline.currentBrushSize);
+        this.brushCursor?.setSize(this.brushTool.getDescriptor().size);
+        const stack = document.getElementById('canvasStack');
+        if (stack) { stack.style.width = opts.width + 'px'; stack.style.height = opts.height + 'px'; }
+        this.emitStateChange();
     }
 
-    private wireTool(tool: BaseTool) {
+    public async resizeCanvas(opts: CanvasSizeOptions): Promise<void> {
+        const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+        const physW = opts.width * dpr, physH = opts.height * dpr;
+        this.canvas.width = physW; this.canvas.height = physH;
+        this.pipeline.reconfigureContext();
+        this.pipeline.resizeInternal(physW, physH, true);
+        this.canvasSize = { width: opts.width, height: opts.height };
+        this.history.restoreUndoStack([]);
+        await this.autosave?.clearSession();
+        this.nav.fitToScreen(opts.width, opts.height);
+        this.pipeline.updateUniforms(physW, physH, this.pipeline.currentBrushSize);
+        this.brushCursor?.setSize(this.brushTool.getDescriptor().size);
+        const stack = document.getElementById('canvasStack');
+        if (stack) { stack.style.width = opts.width + 'px'; stack.style.height = opts.height + 'px'; }
+        this.emitStateChange();
+    }
+
+    // ── Tool management ───────────────────────────────────────────────────────
+
+    public setTool(tool: Tool): void {
+        this._activeTool.reset(this.pipeline);
+        this._activeTool = tool;
+        this.bus.emit('tool:change', { tool: tool.constructor.name });
+
+        const isBrushLike = tool === this.brushTool || tool === this.eraserTool;
+        this.brushCursor?.setVisible(isBrushLike);
+        this.canvas.style.cursor =
+            isBrushLike                  ? 'none'
+          : tool === this.eyedropperTool ? 'crosshair'
+          : tool === this.fillTool       ? 'cell'
+          : tool === this.selectionTool  ? 'crosshair'
+          : 'default';
+    }
+
+    private wireTool(tool: BaseTool): void {
         tool.onPartialFlush = (stamps, layerIndex, blendMode) => {
             this.history.execute({
                 type: 'stroke', label: 'Brush Stroke',
                 layerIndex, stamps, blendMode,
                 floatsPerStamp: FLOATS_PER_STAMP,
-                timestamp:      this.history.now(),
-                selectionMask:  this.pipeline.selectionSnapshot,
+                timestamp: this.history.now()
             });
         };
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // PRESSURE CURVE — public API for UI
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Pressure ──────────────────────────────────────────────────────────────
 
-    /**
-     * Sets the pressure curve from a preset name.
-     * Call this from a UI control (e.g. a dropdown with 'natural', 'soft', etc.)
-     */
-    public setPressurePreset(name: keyof typeof PRESSURE_PRESETS) {
-        this.pressureCurve.update(PRESSURE_PRESETS[name]);
-        this.pushPressureLUT();
+    public setPressureCurve(lut: Float32Array): void {
+        this.brushTool.setPressureLUT(lut.slice());
+        this.eraserTool.setPressureLUT(lut.slice());
     }
 
-    /**
-     * Sets the pressure curve from custom Bézier control points.
-     * Call this from a pressure curve editor widget.
-     */
-    public setPressureCurve(preset: PressureCurvePreset) {
-        this.pressureCurve.update(preset);
-        this.pushPressureLUT();
+    private pushPressureLUT(): void {
+        const lut = this.pressureCurve.toLUT();
+        this.brushTool.setPressureLUT(lut.slice());
+        this.eraserTool.setPressureLUT(lut.slice());
     }
 
-    /**
-     * Sends the current pressure LUT to every tool's worker thread.
-     * Each call generates one LUT copy per tool (cheap — 256 floats).
-     */
-    private pushPressureLUT() {
-        this.brushTool.strokeEngine.setPressureLUT(this.pressureCurve.toLUT());
-        this.eraserTool.strokeEngine.setPressureLUT(this.pressureCurve.toLUT());
+    // ── Events ────────────────────────────────────────────────────────────────
+
+    private emitStateChange(): void {
+        this.emitLayerChange();
+        this.bus.emit('history:change', { canUndo: this.history.canUndo(), canRedo: this.history.canRedo() });
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // EVENT EMISSION
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private emitStateChange() {
-        this.bus.emit('layer:change', {
-            layers:      this.pipeline.layers,
-            activeIndex: this.pipeline.activeLayerIndex
-        });
-        this.bus.emit('history:change', {
-            canUndo: this.history.canUndo(),
-            canRedo: this.history.canRedo()
-        });
+    public emitLayerChange(): void {
+        this.bus.emit('layer:change', { layers: this.pipeline.layers, activeIndex: this.pipeline.activeLayerIndex });
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // RENDER LOOP — with error boundary
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Render loop ───────────────────────────────────────────────────────────
 
-    private renderLoop = (timestamp: number) => {
+    private renderLoop = (timestamp: number): void => {
         if (this.renderLoopStopped) return;
-        try {
-            this.renderFrame(timestamp);
-            this.renderErrorCount = 0;
-        } catch (err) {
-            this.renderErrorCount++;
-            console.error(`[RenderLoop] Error (${this.renderErrorCount}/${this.MAX_RENDER_ERRORS}):`, err);
-            if (this.renderErrorCount >= this.MAX_RENDER_ERRORS) {
+        try { this.renderFrame(timestamp); this.renderErrorCount = 0; }
+        catch (err) {
+            if (++this.renderErrorCount >= this.MAX_RENDER_ERRORS) {
                 this.renderLoopStopped = true;
-                this.showRenderError(err);
-                return;
+                this.showRenderError(err); return;
             }
         }
         requestAnimationFrame(this.renderLoop);
     };
 
-    private renderFrame(timestamp: number) {
-        const delta         = timestamp - this.lastFrameTime;
+    private renderFrame(timestamp: number): void {
+        const delta = timestamp - this.lastFrameTime;
         this.lastFrameDelta = delta > 0 ? delta : this.lastFrameDelta;
         this.lastFrameTime  = timestamp;
+        const overBudget = Math.max(this.lastFrameDelta, this.pipeline.lastGpuMs) > this.budgetMs;
 
-        const worstCaseMs = Math.max(this.lastFrameDelta, this.pipeline.lastGpuMs);
-        const overBudget  = worstCaseMs > this.budgetMs;
-
-        // Drain pointer move queue (Safari + all browsers)
         if (this.isPointerDown && this.pointerMoveQueue.length > 0) {
-            for (const move of this.pointerMoveQueue) {
-                this.activeTool.onPointerMove(
-                    move.x, move.y, move.pressure,
-                    this.pipeline,
-                    move.tiltX, move.tiltY
-                );
-            }
+            for (const m of this.pointerMoveQueue)
+                this._activeTool.onPointerMove(m.x, m.y, m.pressure, this.pipeline, m.tiltX, m.tiltY);
         }
         this.pointerMoveQueue = [];
 
-        const stamps     = this.activeTool.renderTick(this.pipeline);
-        const toolActive = this.activeTool.isActive;
+        const stamps     = this._activeTool.renderTick(this.pipeline);
+        const toolActive = this._activeTool.isActive;
 
         if (stamps.length > 0 || toolActive) this.idleFrameCount = 0;
         else this.idleFrameCount++;
 
         const isIdle = this.idleFrameCount > IDLE_CLEAR_FRAMES;
-
-        if (!overBudget && !isIdle) {
-            this.pipeline.drawPrediction(this.activeTool.getPrediction(), toolActive);
-        } else if (!isIdle) {
+        if (!overBudget && !isIdle)
+            this.pipeline.drawPrediction(this._activeTool.getPrediction(), toolActive);
+        else if (!isIdle)
             this.pipeline.drawPrediction(new Float32Array(), toolActive);
-        }
 
         this.pipeline.composite();
     }
 
-    private showRenderError(err: unknown) {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = `
-            position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;
-            flex-direction:column;align-items:center;justify-content:center;
-            z-index:9999;font-family:sans-serif;color:#fff;padding:24px;text-align:center;
-        `;
-        overlay.innerHTML = `
-            <h2 style="margin:0 0 12px;font-size:20px">Render error</h2>
-            <p style="margin:0 0 20px;opacity:.75;max-width:400px">
-                The GPU encountered a fatal error. Your work is preserved —
-                reload the page to recover.
-            </p>
-            <p style="margin:0 0 24px;font-size:12px;opacity:.4;font-family:monospace;max-width:480px">
-                ${err instanceof Error ? err.message : String(err)}
-            </p>
-            <button onclick="location.reload()"
-                style="padding:10px 24px;background:#fff;color:#000;border:none;
-                       border-radius:6px;font-size:15px;cursor:pointer">
-                Reload
-            </button>
-        `;
-        document.body.appendChild(overlay);
+    private showRenderError(err: unknown): void {
+        const div = document.createElement('div');
+        div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;color:#fff;font-family:sans-serif;padding:24px;text-align:center;';
+        div.innerHTML = `<h2>Render error</h2><p style="opacity:.7;max-width:400px;margin:12px 0">GPU fatal error. Reload to recover.</p><p style="font-size:11px;opacity:.4;font-family:monospace">${err instanceof Error ? err.message : err}</p><button onclick="location.reload()" style="margin-top:20px;padding:10px 24px;background:#fff;color:#000;border:none;border-radius:6px;cursor:pointer">Reload</button>`;
+        document.body.appendChild(div);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // INPUT HANDLING
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Input ─────────────────────────────────────────────────────────────────
 
-    /**
-     * Returns true if this pointer event should be rejected as a palm.
-     *
-     * Two rejection rules:
-     *   1. Large contact area — pointerType 'touch' with width×height above
-     *      threshold. Apple Pencil always reports pointerType 'pen', so this
-     *      rule never fires for stylus input.
-     *   2. Second simultaneous pointer — a new pointerdown while a stroke is
-     *      already active on a different pointer ID. This catches the case where
-     *      the palm lands just after the pen, which would otherwise start a
-     *      second unwanted stroke.
-     */
     private isPalmRejected(e: PointerEvent): boolean {
-        if (e.pointerType === 'touch') {
-            const area = (e.width || 1) * (e.height || 1);
-            if (area > PALM_AREA_THRESHOLD) return true;
-        }
-        if (this.activePointerId !== null && e.pointerId !== this.activePointerId) {
-            return true;
-        }
+        if (e.pointerType === 'touch' && (e.width||1)*(e.height||1) > PALM_AREA_THRESHOLD) return true;
+        if (this.activePointerId !== null && e.pointerId !== this.activePointerId) return true;
         return false;
     }
 
-    /**
-     * Extracts tilt from a PointerEvent.
-     *
-     * Availability by platform:
-     *   Apple Pencil (iPadOS Safari)  — tiltX, tiltY reported correctly
-     *   Windows Ink stylus (Chrome)   — tiltX, tiltY reported correctly
-     *   Mouse / trackpad              — both 0 (no tilt)
-     *   Touch                         — both 0 (no tilt)
-     *
-     * Values are in degrees, range -90..90.
-     * A missing or NaN value is treated as 0 (vertical pen = circular stamp).
-     */
-    private extractTilt(e: PointerEvent): { tiltX: number; tiltY: number } {
-        const tiltX = Number.isFinite(e.tiltX) ? e.tiltX : 0;
-        const tiltY = Number.isFinite(e.tiltY) ? e.tiltY : 0;
-        return { tiltX, tiltY };
-    }
-
-    private setupInputs() {
-        setupPointer(
-            this.canvas,
-
-            // POINTER DOWN
+    private setupInputs(): void {
+        setupPointer(this.canvas,
             (x, y, p, e) => {
                 if (this.nav.isNavigating || e.buttons !== 1) return;
                 if (this.isPalmRejected(e)) return;
+                const isPainting = this._activeTool !== this.eyedropperTool &&
+                                   this._activeTool !== this.fillTool &&
+                                   this._activeTool !== this.selectionTool;
+                if (isPainting && this.pipeline.layerManager.getActiveLayer()?.locked) return;
 
-                this.isPointerDown    = true;
-                this.activePointerId  = e.pointerId;
-                this.idleFrameCount   = 0;
+                this.isPointerDown   = true;
+                this.activePointerId = e.pointerId;
+                this.idleFrameCount  = 0;
                 this.pointerMoveQueue = [];
-
                 const c = this.translatePoint(e.clientX, e.clientY);
-                const { tiltX, tiltY } = this.extractTilt(e);
-                this.activeTool.onPointerDown(c.x, c.y, p, this.pipeline, tiltX, tiltY);
+                const tiltX = Number.isFinite(e.tiltX) ? e.tiltX : 0;
+                const tiltY = Number.isFinite(e.tiltY) ? e.tiltY : 0;
+                this._activeTool.onPointerDown(c.x, c.y, p, this.pipeline, tiltX, tiltY);
             },
-
-            // POINTER MOVE — queue for rAF drain
             (x, y, p, e) => {
                 if (this.nav.isNavigating || e.buttons !== 1) return;
                 if (this.activePointerId !== null && e.pointerId !== this.activePointerId) return;
-
                 const events = (e as any).getCoalescedEvents?.() ?? [e];
                 for (const ev of events) {
                     const c = this.translatePoint(ev.clientX, ev.clientY);
-                    const { tiltX, tiltY } = this.extractTilt(ev);
-                    this.pointerMoveQueue.push({
-                        x: c.x, y: c.y,
-                        pressure: ev.pressure || p,
-                        tiltX, tiltY
-                    });
+                    const tiltX = Number.isFinite(ev.tiltX) ? ev.tiltX : 0;
+                    const tiltY = Number.isFinite(ev.tiltY) ? ev.tiltY : 0;
+                    this.pointerMoveQueue.push({ x: c.x, y: c.y, pressure: ev.pressure || p, tiltX, tiltY });
                 }
             },
-
-            // POINTER UP
             async (x, y, p, e) => {
                 if (this.activePointerId !== null && e.pointerId !== this.activePointerId) return;
-
                 this.isPointerDown   = false;
                 this.activePointerId = null;
 
-                // Drain remaining queued moves before finalizing
                 if (this.pointerMoveQueue.length > 0) {
-                    for (const move of this.pointerMoveQueue) {
-                        this.activeTool.onPointerMove(
-                            move.x, move.y, move.pressure,
-                            this.pipeline,
-                            move.tiltX, move.tiltY
-                        );
-                    }
+                    for (const m of this.pointerMoveQueue)
+                        this._activeTool.onPointerMove(m.x, m.y, m.pressure, this.pipeline, m.tiltX, m.tiltY);
                     this.pointerMoveQueue = [];
                 }
 
                 const c      = this.translatePoint(e.clientX, e.clientY);
-                const stamps = await this.activeTool.onPointerUp(c.x, c.y, p, this.pipeline);
+                const stamps = await this._activeTool.onPointerUp(c.x, c.y, p, this.pipeline);
 
                 if (stamps && stamps.length > 0) {
                     await this.history.execute({
-                        type:           'stroke',
-                        label:          'Brush Stroke',
+                        type: 'stroke', label: 'Brush Stroke',
                         layerIndex:     this.pipeline.activeLayerIndex,
                         stamps,
-                        blendMode:      this.activeTool.blendMode,
+                        blendMode:      this._activeTool.blendMode,
                         floatsPerStamp: FLOATS_PER_STAMP,
-                        timestamp:      this.history.now(),
-                        selectionMask:  this.pipeline.selectionSnapshot,
+                        timestamp:      this.history.now()
                     });
                 }
             }
         );
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // COMMAND DISPATCHERS
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Layer commands ────────────────────────────────────────────────────────
 
-    public async addLayer() {
-        await this.history.execute({
-            type: 'add-layer', label: 'Add Layer',
-            layerIndex: this.pipeline.layers.length
-        });
+    public async addLayer(): Promise<void> {
+        await this.history.execute({ type: 'add-layer', label: 'Add Layer', layerIndex: this.pipeline.layers.length, timestamp: this.history.now() });
     }
 
-    public async deleteLayer(index: number) {
+    public async deleteLayer(index: number): Promise<void> {
         if (this.pipeline.layers.length <= 1) return;
-        await this.history.execute({
-            type: 'delete-layer', label: 'Delete Layer', layerIndex: index
-        });
+        await this.history.execute({ type: 'delete-layer', label: 'Delete Layer', layerIndex: index, timestamp: this.history.now() });
     }
 
-    public setActiveLayer(index: number) {
+    public setActiveLayer(index: number): void {
         this.pipeline.activeLayerIndex = index;
         this.pipeline.markDirty();
-        this.bus.emit('layer:change', {
-            layers:      this.pipeline.layers,
-            activeIndex: this.pipeline.activeLayerIndex
-        });
+        this.emitLayerChange();
     }
 
-    public setBrushSize(size: number) {
+    public reorderLayer(from: number, to: number): void {
+        this.pipeline.reorderLayer(from, to);
+        this.emitLayerChange();
+    }
+
+    // ── Brush setters ─────────────────────────────────────────────────────────
+
+    public setBrushSize(size: number): void {
+        this.brushTool.setSize(size);
         this.pipeline.updateUniforms(this.canvas.width, this.canvas.height, size);
-        this.bus.emit('brush:change', { size, color: this.pipeline.currentBrushColor });
+        this.brushCursor?.setSize(size);
+        this.bus.emit('brush:change', { size, color: Array.from(this.brushTool.getCurrentColor()) });
     }
 
-    public setBrushColor(r: number, g: number, b: number, a: number = 1.0) {
-        this.pipeline.currentBrushColor = [r, g, b, a];
-        this.bus.emit('brush:change', {
-            size: this.pipeline.currentBrushSize, color: [r, g, b, a]
+    public setBrushColor(r: number, g: number, b: number, a = 1.0): void {
+        this.brushTool.setColor(r, g, b, a);
+        this.pipeline.currentFillColor = [Math.round(r*255), Math.round(g*255), Math.round(b*255), Math.round(a*255)];
+        this.bus.emit('brush:change', { size: this.brushTool.getDescriptor().size, color: [r, g, b, a] });
+    }
+
+    public setBrushOpacity(opacity: number): void   { this.brushTool.setOpacity(opacity); }
+    public setBrushHardness(hardness: number): void  {
+        this.brushTool.setHardness(hardness);
+        this.pipeline.brushRenderer.setConfig({ blendMode: 'normal', hardness });
+    }
+
+    public clearLayer(): void { this._activeTool.reset(this.pipeline); this.pipeline.clear(); }
+
+    public selectAll(): void {
+        this.history.execute({
+            type: 'selection', label: 'Selection',
+            operation: 'selectAll', selMode: 'replace',
+            timestamp: this.history.now()
         });
     }
 
-    public clearLayer() {
-        this.activeTool.reset(this.pipeline);
-        this.pipeline.clear();
+    public deselect(): void {
+        this.history.execute({
+            type: 'selection', label: 'Selection',
+            operation: 'deselect', selMode: 'replace',
+            timestamp: this.history.now()
+        });
     }
 
-    public setBrushSmoothing(strength: number) {
-        this.brushTool.setSmoothing(strength);
+    public invertSelection(): void {
+        this.history.execute({
+            type: 'selection', label: 'Selection',
+            operation: 'invertSelection', selMode: 'replace',
+            timestamp: this.history.now()
+        });
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // COORDINATE TRANSLATION
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Copy / Cut / Paste ────────────────────────────────────────────────────
 
+    public async copy(): Promise<void> {
+        const layer = this.pipeline.layerManager.getActiveLayer();
+        if (!layer) return;
+        const pixels = await this.pipeline.effectsPipeline.snapshotTexture(layer.texture);
+        if (this.pipeline.selectionManager.hasMask) {
+            const mask = this.pipeline.selectionManager.getMaskData();
+            for (let i = 0; i < mask.length; i++) {
+                if (mask[i] === 0) pixels[i * 4 + 3] = 0;
+            }
+        }
+        this.clipboard = { pixels };
+    }
+
+    public async cut(): Promise<void> {
+        const layer = this.pipeline.layerManager.getActiveLayer();
+        if (!layer) return;
+        const pixels = await this.pipeline.effectsPipeline.snapshotTexture(layer.texture);
+        // Build the post-cut pixel state (clear selected or all pixels)
+        const afterCut = pixels.slice();
+        if (this.pipeline.selectionManager.hasMask) {
+            const mask = this.pipeline.selectionManager.getMaskData();
+            for (let i = 0; i < mask.length; i++) {
+                if (mask[i] > 0)  afterCut[i * 4 + 3] = 0;  // clear selected
+                else              pixels[i * 4 + 3]   = 0;  // clipboard: keep only selected
+            }
+        } else {
+            // No selection: copy full layer, clear full layer
+            afterCut.fill(0);
+        }
+        this.clipboard = { pixels };
+        // Apply the cut to GPU immediately (before pushing to history)
+        this.pipeline.effectsPipeline.restoreTexture(layer.texture, afterCut);
+        this.pipeline.markDirty();
+        await this.history.execute({
+            type: 'cut', label: 'Cut',
+            layerIndex: this.pipeline.activeLayerIndex,
+            pixels:     afterCut,
+            timestamp:  this.history.now(),
+        });
+        this.emitStateChange();
+    }
+
+    public async paste(): Promise<void> {
+        if (!this.clipboard) return;
+        await this.history.execute({
+            type:      'paste', label: 'Paste',
+            pixels:    this.clipboard.pixels.slice(),
+            timestamp: this.history.now(),
+        });
+        this.emitStateChange();
+    }
+
+    // ── Coordinate conversion ─────────────────────────────────────────────────
+
+    /** Screen (clientX/Y) → normalized canvas (0..1). Accounts for pan, zoom, rotation. */
     private translatePoint(clientX: number, clientY: number): { x: number; y: number } {
-        const rect = this.getCanvasRect();
+        const wrapW   = window.innerWidth;
+        const wrapH   = window.innerHeight - HEADER_H;
+        const centerX = wrapW / 2 + this.nav.state.x;
+        const centerY = HEADER_H + wrapH / 2 + this.nav.state.y;
+        const dx = clientX - centerX, dy = clientY - centerY;
+        const rad = -(this.nav.state.rotation * Math.PI / 180);
+        const rx  = dx * Math.cos(rad) - dy * Math.sin(rad);
+        const ry  = dx * Math.sin(rad) + dy * Math.cos(rad);
         return {
-            x: (clientX - rect.left) / rect.width,
-            y: (clientY - rect.top)  / rect.height
+            x: 0.5 + rx / (this.canvasSize.width  * this.nav.state.zoom),
+            y: 0.5 + ry / (this.canvasSize.height * this.nav.state.zoom),
         };
     }
 
-    private getCanvasRect(): DOMRect {
-        if (!this.cachedRect) this.cachedRect = this.canvas.getBoundingClientRect();
-        return this.cachedRect;
+    /** Normalized canvas (0..1) → screen CSS pixels. Used by SelectionTool overlay. */
+    public canvasToScreen(nx: number, ny: number): { x: number; y: number } {
+        const wrapW   = window.innerWidth;
+        const wrapH   = window.innerHeight - HEADER_H;
+        const centerX = wrapW / 2 + this.nav.state.x;
+        const centerY = HEADER_H + wrapH / 2 + this.nav.state.y;
+        const lx = (nx - 0.5) * this.canvasSize.width  * this.nav.state.zoom;
+        const ly = (ny - 0.5) * this.canvasSize.height * this.nav.state.zoom;
+        const rad = this.nav.state.rotation * Math.PI / 180;
+        return {
+            x: centerX + lx * Math.cos(rad) - ly * Math.sin(rad),
+            y: centerY + lx * Math.sin(rad) + ly * Math.cos(rad),
+        };
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // CANVAS TRANSFORM
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private updateCanvasTransform() {
-        const s    = this.canvas.style;
-        const zoom = this.nav.state.zoom;
-        s.width     = `${this.canvasSize.width  * zoom}px`;
-        s.height    = `${this.canvasSize.height * zoom}px`;
+    private updateCanvasTransform(): void {
+        const s = this.canvas.style, z = this.nav.state.zoom, r = this.nav.state.rotation;
+        s.width     = `${this.canvasSize.width  * z}px`;
+        s.height    = `${this.canvasSize.height * z}px`;
         s.left      = `calc(50% + ${this.nav.state.x}px)`;
         s.top       = `calc(50% + ${this.nav.state.y}px)`;
-        s.transform = `translate(-50%, -50%)`;
+        s.transform = `translate(-50%, -50%) rotate(${r}deg)`;
         s.position  = 'absolute';
-        this.cachedRect = null;
     }
 }
