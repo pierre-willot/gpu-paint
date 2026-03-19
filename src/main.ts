@@ -1,231 +1,230 @@
-import { initGPU } from "./renderer/webgpu";
-import { setupPointer } from "./input/pointer";
-import { StrokeEngine } from "./renderer/stroke";
-import { PaintPipeline } from "./renderer/pipeline";
-import { UndoManager } from "./renderer/history";
-import { NavigationManager } from "./input/navigation";
+import { initGPU }              from './renderer/webgpu';
+import { PaintApp }             from './core/app';
+import { LayerUI }              from './ui/layer-ui';
+import { ToolbarUI }            from './ui/toolbar-ui';
+import { ColorState }           from './core/color-state';
+import { ColorPickerUI }        from './ui/color-picker/color-picker-ui';
+import { PanelManager, makeDraggable, addResizeHandles } from './ui/panel-manager';
+import { MenuManager }          from './ui/menu';
+import { SessionStore }         from './core/session-store';
+import { AutosaveManager }      from './core/autosave-manager';
+import { RestoreBanner }        from './ui/restore-banner';
+import { GestureRecognizer }    from './input/gesture-recognizer';
+import { FocusMode }            from './ui/overlays/focus-mode';
+import { PressureCurveUI }      from './ui/panels/pressure-curve-ui';
+import { CanvasSizeDialog }     from './ui/panels/canvas-size-dialog';
 import './style.css';
 
-async function start() {
-  const { device, context, format, canvas } = await initGPU();
-  const dpr = window.devicePixelRatio || 1;
-  const canvasSize = { width: 3000, height: 3000 };
+const CANVAS_LOGICAL = { width: 1000, height: 1400 };
+const MAX_DPR        = 2;
 
-  canvas.width = canvasSize.width * dpr;
-  canvas.height = canvasSize.height * dpr;
-
-  const pipeline = new PaintPipeline(device, context, format, canvas.width, canvas.height);
-  const strokeEngine = new StrokeEngine();
-  const undoManager = new UndoManager();
-  const nav = new NavigationManager(canvas, () => updateCanvasTransform());
-  
-  const sizeSlider = document.getElementById('sizeSlider') as HTMLInputElement;
-  const layerList = document.getElementById('layer-list');
-  const addLayerBtn = document.getElementById('add-layer-btn');
-  const undoBtn = document.getElementById('undoBtn') as HTMLButtonElement;
-  const redoBtn = document.getElementById('redoBtn') as HTMLButtonElement;
-
-  let currentStrokeStamps: number[] = [];
-
-  // --- UI: LAYERS ---
-  function refreshLayerUI() {
-    if (!layerList) return;
-    layerList.innerHTML = '';
-    [...pipeline.layers].reverse().forEach((_, i) => {
-      const actualIndex = pipeline.layers.length - 1 - i;
-      const layerItem = document.createElement('div');
-      layerItem.className = `layer-item ${actualIndex === pipeline.activeLayerIndex ? 'active' : ''}`;
-      layerItem.innerHTML = `
-        <span>Layer ${actualIndex + 1}</span>
-        ${pipeline.layers.length > 1 ? `<button class="delete-layer">×</button>` : ''}
-      `;
-      
-      const deleteBtn = layerItem.querySelector('.delete-layer') as HTMLButtonElement;
-      if (deleteBtn) {
-        deleteBtn.onclick = async (e) => {
-          e.stopPropagation();
-          // 1. Push delete command to history
-          undoManager.push({ 
-            type: 'delete-layer', 
-            layerIndex: actualIndex 
-          });
-          // 2. Reconstruct everything
-          await pipeline.reconstructFromHistory(undoManager.getHistory());
-          refreshLayerUI();
-          pipeline.composite();
-          updateHistoryButtons();
-        };
-      }
-      
-      layerItem.onclick = () => {
-        pipeline.activeLayerIndex = actualIndex;
-        refreshLayerUI();
-      };
-      layerList.appendChild(layerItem);
+function measureRefreshRate(): Promise<number> {
+    return new Promise(resolve => {
+        const samples: number[] = []; let last = 0;
+        function tick(t: number) {
+            if (last > 0 && t - last < 100) samples.push(t - last);
+            last = t;
+            if (samples.length < 10) { requestAnimationFrame(tick); return; }
+            const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
+            resolve(1000 / avg > 100 ? 120 : 1000 / avg > 75 ? 90 : 60);
+        }
+        requestAnimationFrame(tick);
     });
-  }
-
-  function updateHistoryButtons() {
-    if (undoBtn) undoBtn.disabled = !undoManager.canUndo();
-    if (redoBtn) redoBtn.disabled = !undoManager.canRedo();
-  }
-
-  // --- UTILS ---
-  function updateCanvasTransform() {
-    canvas.style.width = `${canvasSize.width * nav.state.zoom}px`;
-    canvas.style.height = `${canvasSize.height * nav.state.zoom}px`;
-    canvas.style.left = `calc(50% + ${nav.state.x}px)`;
-    canvas.style.top = `calc(50% + ${nav.state.y}px)`;
-    canvas.style.transform = `translate(-50%, -50%)`;
-    canvas.style.position = "absolute";
-  }
-
-  const translateCoords = (clientX: number, clientY: number) => {
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: (clientX - rect.left) / rect.width,
-      y: (clientY - rect.top) / rect.height
-    };
-  };
-
-  // --- UNDO/REDO HANDLERS ---
-  const handleUndo = async () => {
-    // Prevent removing the very first 'add-layer' command
-    if (undoManager.getHistory().length <= 1) return; 
-
-    if (undoManager.undo()) {
-      await pipeline.reconstructFromHistory(undoManager.getHistory());
-      refreshLayerUI(); 
-      pipeline.composite(); // This call now works!
-      updateHistoryButtons();
-    }
-  };
-
-  const handleRedo = async () => {
-    if (undoManager.redo()) {
-      await pipeline.reconstructFromHistory(undoManager.getHistory());
-      refreshLayerUI(); // Important: Layers might have changed
-      pipeline.composite(); 
-      updateHistoryButtons();
-    }
-  };
-
-  // --- INPUT LOGIC ---
-  setupPointer(
-    canvas,
-    (x, y, p, e) => {
-      if (nav.isNavigating || e.buttons !== 1) return;
-      currentStrokeStamps = [];
-      const coords = translateCoords(e.clientX, e.clientY);
-      strokeEngine.beginStroke(coords.x, coords.y, p);
-    },
-    (x, y, p, e) => {
-      if (nav.isNavigating || e.buttons !== 1) {
-        if (strokeEngine.isDrawing) strokeEngine.endStroke(x, y, p);
-        return;
-      }
-      const events = (e as any).getCoalescedEvents?.() || [e];
-      for (const ev of events) {
-        const coords = translateCoords(ev.clientX, ev.clientY);
-        strokeEngine.addPoint(coords.x, coords.y, ev.pressure || p);
-      }
-    },
-    (x, y, p, e) => {
-      const coords = translateCoords(e.clientX, e.clientY);
-      strokeEngine.endStroke(coords.x, coords.y, p);
-
-      const finalStamps = strokeEngine.flush();
-      if (finalStamps.length > 0) {
-        pipeline.draw(finalStamps);
-        currentStrokeStamps.push(...finalStamps);
-      }
-
-      if (currentStrokeStamps.length > 0) {
-        undoManager.push({
-          type: 'stroke',
-          layerIndex: pipeline.activeLayerIndex,
-          stamps: new Float32Array(currentStrokeStamps)
-        });
-        currentStrokeStamps = []; 
-      }
-      updateHistoryButtons();
-    }
-  );
-
-  function renderLoop() {
-    if (!strokeEngine) {
-      requestAnimationFrame(renderLoop);
-      return;
-    }
-    const stamps = strokeEngine.flush();
-    if (stamps.length > 0) {
-      pipeline.draw(stamps); 
-      if (strokeEngine.isDrawing) {
-        currentStrokeStamps.push(...stamps);
-      }
-    }
-    const prediction = strokeEngine.getPredictedStamps();
-    pipeline.drawPrediction(prediction); 
-    pipeline.composite(); 
-    requestAnimationFrame(renderLoop);
-  }
-
-  // --- REVISED LAYER LISTENERS ---
-  addLayerBtn?.addEventListener('click', async () => {
-    // 1. Push to history
-    undoManager.push({ 
-      type: 'add-layer', 
-      layerIndex: pipeline.layers.length 
-    });
-    // 2. Reconstruct state
-    await pipeline.reconstructFromHistory(undoManager.getHistory());
-    refreshLayerUI();
-    pipeline.composite();
-    updateHistoryButtons();
-  });
-
-  undoBtn?.addEventListener('click', handleUndo);
-  redoBtn?.addEventListener('click', handleRedo);
-
-  window.addEventListener('keydown', async (e) => {
-    const key = e.key.toLowerCase();
-    if (e.ctrlKey && key === 'z' && !e.shiftKey) {
-      e.preventDefault();
-      await handleUndo();
-    }
-    if ((e.ctrlKey && key === 'y') || (e.ctrlKey && e.shiftKey && key === 'z')) {
-      e.preventDefault();
-      await handleRedo();
-    }
-  });
-
-  document.getElementById('saveBtn')?.addEventListener('click', () => pipeline.saveImage());
-  
-  sizeSlider?.addEventListener('input', () => {
-    pipeline.updateUniforms(canvas.width, canvas.height, parseFloat(sizeSlider.value));
-  });
-
-  updateCanvasTransform();
-  // Ensure we start with the first "Add Layer" in history if you want it undoable
-  // Or just call refresh directly if you want the first layer to be permanent.
-  
-
-  // 1. Manually push the first layer into history so it's the base of everything
-  undoManager.push({ 
-    type: 'add-layer', 
-    layerIndex: 0 
-  });
-
-  // 2. Run reconstruction to actually create that first layer on the GPU
-  await pipeline.reconstructFromHistory(undoManager.getHistory());
-
-
-  
-  
-  refreshLayerUI();
-  updateHistoryButtons();
-  renderLoop();
 }
 
-window.addEventListener('contextmenu', (e) => e.preventDefault());
-start();
+function subscribeUI(app: PaintApp, layerUI: LayerUI, toolbarUI: ToolbarUI): void {
+    app.bus.on('layer:change',   ({ layers, activeIndex }) => layerUI.render(layers, activeIndex));
+    app.bus.on('history:change', ({ canUndo, canRedo })    => toolbarUI.updateHistoryButtons(canUndo, canRedo));
+    app.bus.on('save:status',    status                    => toolbarUI.updateSaveStatus(status));
+    app.bus.on('brush:change',   ({ size })                => toolbarUI.updateBrushDot(size));
+}
+
+async function bootstrap() {
+    try {
+        const fps = await measureRefreshRate();
+        const { device, context, format, canvas, supportsTimestamps } = await initGPU();
+
+        const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+        const w   = CANVAS_LOGICAL.width  * dpr;
+        const h   = CANVAS_LOGICAL.height * dpr;
+        canvas.width = w; canvas.height = h;
+
+        const stack = document.getElementById('canvasStack');
+        if (stack) { stack.style.width = CANVAS_LOGICAL.width + 'px'; stack.style.height = CANVAS_LOGICAL.height + 'px'; }
+
+        console.info(`[GPU Paint] ${w}×${h}px · DPR=${dpr} · ${fps}Hz`);
+
+        // ── App ───────────────────────────────────────────────────────────────
+        const app = new PaintApp(
+            canvas, device, context, format,
+            { width: CANVAS_LOGICAL.width, height: CANVAS_LOGICAL.height },
+            supportsTimestamps, fps
+        );
+
+        app.initBrushCursor();
+
+        // ── Panels ────────────────────────────────────────────────────────────
+        const panelIds = ['leftPanel', 'rightPanel', 'layerPanel', 'brushSettingsPanel', 'prefsPanel', 'exportPanel'];
+        for (const id of panelIds) {
+            const p = document.getElementById(id);
+            if (p) { makeDraggable(p); addResizeHandles(p, { minW: 60, minH: 80 }); }
+        }
+        new PanelManager();
+
+        // ── Color ─────────────────────────────────────────────────────────────
+        const colorState = new ColorState(app.bus);
+        new ColorPickerUI(colorState);
+
+        colorState.subscribeLocal(() => {
+            const { rgb } = colorState;
+            app.setBrushColor(rgb.r / 255, rgb.g / 255, rgb.b / 255, 1.0);
+        });
+        app.bus.on('color:change', ({ rgb }) => colorState.setRgb(rgb.r, rgb.g, rgb.b));
+
+        // ── Layer + toolbar UI ────────────────────────────────────────────────
+        const layerUI   = new LayerUI(document.getElementById('layer-list'), document.getElementById('add-layer-btn'), app);
+        const toolbarUI = new ToolbarUI(app);
+        subscribeUI(app, layerUI, toolbarUI);
+
+        // ── Brush size slider ─────────────────────────────────────────────────
+        const sizeSlider = document.getElementById('sizeSlider') as HTMLInputElement | null;
+        sizeSlider?.addEventListener('input', () => {
+            const size = parseFloat(sizeSlider.value);
+            app.setBrushSize(size);
+            toolbarUI.updateBrushDot(size);
+        });
+
+        // ── Brush settings panel ──────────────────────────────────────────────
+        wireBrushSettings(app);
+
+        // ── B2 — Pressure curve UI ────────────────────────────────────────────
+        const pressureContainer = document.getElementById('pressureCurveContainer');
+        if (pressureContainer) {
+            new PressureCurveUI(pressureContainer, lut => app.setPressureCurve(lut));
+        }
+
+        // ── B11 — Canvas size dialog ──────────────────────────────────────────
+        const sizeDialog = new CanvasSizeDialog({
+            onNewCanvas:    opts => app.newCanvas(opts).then(() => app.emitLayerChange()),
+            onResizeCanvas: opts => app.resizeCanvas(opts).then(() => app.emitLayerChange()),
+        });
+
+        // ── Focus mode ────────────────────────────────────────────────────────
+        const focusMode = new FocusMode();
+
+        // ── Touch gestures ────────────────────────────────────────────────────
+        new GestureRecognizer(canvas, app.nav, {
+            onUndo:        () => app.history.undo(),
+            onRedo:        () => app.history.redo(),
+            onFocusToggle: () => focusMode.toggle()
+        });
+
+        // ── Autosave ──────────────────────────────────────────────────────────
+        let autosave: AutosaveManager | null = null;
+        try {
+            const store = new SessionStore(); await store.open();
+            autosave = new AutosaveManager(store, status => app.bus.emit('save:status', status));
+            app.connectAutosave(autosave);
+            if (await store.hasSession()) {
+                const sessionData = await autosave.loadSessionData();
+                if (sessionData?.meta) {
+                    new RestoreBanner(
+                        sessionData.meta.timestamp,
+                        async () => { const d = await autosave!.loadSessionData(); if (d) await app.restoreSession(d); },
+                        async () => { await autosave!.clearSession(); }
+                    );
+                }
+            }
+            await autosave.init(w, h);
+        } catch (err) { console.warn('[Autosave] IndexedDB unavailable:', err); }
+
+        // ── Menus (pass sizeDialog so File→New and Edit→Resize work) ──────────
+        new MenuManager(app, autosave, () => toolbarUI.triggerFileInput(), sizeDialog);
+
+        // ── App init ──────────────────────────────────────────────────────────
+        await app.init();
+        colorState.broadcastLocal();
+        toolbarUI.updateBrushDot(app.pipeline.currentBrushSize);
+
+        // ── Keyboard shortcuts ────────────────────────────────────────────────
+        window.addEventListener('keydown', async (e) => {
+            const target = e.target as HTMLElement;
+            if (target.isContentEditable || target.tagName === 'INPUT') return;
+
+            const ctrl = e.ctrlKey || e.metaKey;
+            const key  = e.key.toLowerCase();
+
+            // Save / open
+            if (ctrl && key === 's' && !e.shiftKey) { e.preventDefault(); await autosave?.saveNow(); return; }
+            if (ctrl && key === 's' &&  e.shiftKey) { e.preventDefault(); await app.saveProject();   return; }
+            if (ctrl && key === 'o')                 { e.preventDefault(); toolbarUI.triggerFileInput(); return; }
+            if (ctrl && key === 'n')                 { e.preventDefault(); sizeDialog.openNew();     return; }
+            if (ctrl && e.altKey && key === 'c') {
+                e.preventDefault();
+                const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+                sizeDialog.openResize(Math.round(app.pipeline.canvasWidth / dpr), Math.round(app.pipeline.canvasHeight / dpr));
+                return;
+            }
+
+            // Quick search
+            if (ctrl && key === 'k') { e.preventDefault(); document.getElementById('quickSearchBtn')?.click(); return; }
+
+            // View rotation
+            if (!ctrl && key === 'r') { e.preventDefault(); app.nav.rotateBy(e.shiftKey ? -15 : 15); }
+
+            // Zoom
+            if (ctrl && (key === '=' || key === '+')) { e.preventDefault(); app.nav.zoomIn();  }
+            if (ctrl && key === '-')                   { e.preventDefault(); app.nav.zoomOut(); }
+            if (ctrl && (key === '0' || e.code === 'Numpad0')) {
+                e.preventDefault();
+                const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+                app.nav.fitToScreen(app.pipeline.canvasWidth / dpr, app.pipeline.canvasHeight / dpr);
+            }
+
+            // Effects
+            if (ctrl && key === 'u') { e.preventDefault(); document.getElementById('efx-hueSat')?.classList.toggle('open'); }
+        });
+
+        // ── Drag-and-drop .gpaint ─────────────────────────────────────────────
+        document.body.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer!.dropEffect = 'copy'; });
+        document.body.addEventListener('drop', async e => {
+            e.preventDefault();
+            const file = e.dataTransfer?.files[0];
+            if (!file?.name.endsWith('.gpaint')) return;
+            try { await app.openProject(await file.arrayBuffer()); }
+            catch (err) { alert(`Failed to open: ${err instanceof Error ? err.message : err}`); }
+        });
+
+        // ── GPU device loss recovery ──────────────────────────────────────────
+        window.addEventListener('webgpu-device-lost', async () => {
+            console.warn('Attempting GPU recovery…');
+            try {
+                app.bus.clear();
+                const fresh = await initGPU(canvas); fresh.canvas.width = w; fresh.canvas.height = h;
+                await app.pipeline.reconstructFromHistory(app.history.getHistory());
+                app.pipeline.markDirty();
+                subscribeUI(app, layerUI, toolbarUI);
+            } catch (e) {
+                document.body.innerHTML = `<div style="color:red;padding:20px"><h2>GPU Recovery Failed</h2><p>${e}</p></div>`;
+            }
+        });
+
+    } catch (error) {
+        console.error('Initialization failed:', error);
+        document.body.innerHTML = `<div style="color:red;padding:20px"><h2>Init Failed</h2><p>${error}</p></div>`;
+    }
+}
+
+function wireBrushSettings(app: PaintApp): void {
+    const bind = (sliderId: string, valId: string, suffix: string, fn: (v: number) => void) => {
+        const s = document.getElementById(sliderId) as HTMLInputElement | null;
+        const v = document.getElementById(valId)   as HTMLInputElement | null;
+        s?.addEventListener('input', () => { const n = parseInt(s.value); if (v) v.value = n + suffix; fn(n / 100); });
+    };
+    bind('bs-opacity',  'bs-opacity-val',  '%', v => app.setBrushOpacity(v));
+    bind('bs-flow',     'bs-flow-val',     '%', v => app.brushTool.setFlow(v));
+    bind('bs-hardness', 'bs-hardness-val', '%', v => app.setBrushHardness(v));
+    bind('bs-spacing',  'bs-spacing-val',  '%', v => app.brushTool.setSpacing(v / 100));
+}
+
+bootstrap();

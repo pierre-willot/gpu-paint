@@ -1,64 +1,97 @@
 // src/utils/export.ts
 
-/**
- * Downloads a GPUTexture as a PNG file.
- */
-export async function downloadTexture(device: GPUDevice, texture: GPUTexture, fileName: string = "drawing.png") {
-  const width = texture.width;
-  const height = texture.height;
+// ── textureToBytes ─────────────────────────────────────────────────────────────
+// Reads a GPUTexture to a row-packed Uint8Array (no alignment padding).
+// Exported so project-format.ts can reuse the GPU readback logic without
+// duplicating it. All downstream callers get un-padded pixel rows.
 
-  // 1. Calculate bytes per row (Must be a multiple of 256)
-  const bytesPerPixel = 4;
-  const unpaddedBytesPerRow = width * bytesPerPixel;
-  const align = 256;
-  const paddedBytesPerRow = Math.ceil(unpaddedBytesPerRow / align) * align;
+export async function textureToBytes(
+    device:  GPUDevice,
+    texture: GPUTexture
+): Promise<Uint8Array> {
+    const width          = texture.width;
+    const height         = texture.height;
+    const bytesPerPixel  = 4;
+    const unpaddedPerRow = width * bytesPerPixel;
+    const paddedPerRow   = Math.ceil(unpaddedPerRow / 256) * 256;
 
-  // 2. Create a buffer to read the GPU data
-  const readBuffer = device.createBuffer({
-    label: "Export Readback Buffer",
-    size: paddedBytesPerRow * height,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  });
+    const readBuffer = device.createBuffer({
+        label: 'Export Readback Buffer',
+        size:  paddedPerRow * height,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+    });
 
-  // 3. Encode the copy command
-  const encoder = device.createCommandEncoder();
-  encoder.copyTextureToBuffer(
-    { texture: texture },
-    { buffer: readBuffer, bytesPerRow: paddedBytesPerRow },
-    [width, height]
-  );
-  device.queue.submit([encoder.finish()]);
-
-  // 4. Map the buffer to CPU memory
-  await readBuffer.mapAsync(GPUMapMode.READ);
-  const arrayBuffer = readBuffer.getMappedRange();
-  const rawData = new Uint8Array(arrayBuffer);
-
-  // 5. Use Canvas2D to encode the PNG (removes the padding)
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d')!;
-  const imageData = ctx.createImageData(width, height);
-
-  for (let y = 0; y < height; y++) {
-    const srcOffset = y * paddedBytesPerRow;
-    const destOffset = y * width * bytesPerPixel;
-    imageData.data.set(
-      rawData.subarray(srcOffset, srcOffset + unpaddedBytesPerRow),
-      destOffset
+    const encoder = device.createCommandEncoder();
+    encoder.copyTextureToBuffer(
+        { texture },
+        { buffer: readBuffer, bytesPerRow: paddedPerRow },
+        [width, height]
     );
-  }
-  
-  ctx.putImageData(imageData, 0, 0);
+    device.queue.submit([encoder.finish()]);
 
-  // 6. Trigger Download
-  const link = document.createElement('a');
-  link.download = fileName;
-  link.href = canvas.toDataURL('image/png');
-  link.click();
+    await readBuffer.mapAsync(GPUMapMode.READ);
+    const raw    = new Uint8Array(readBuffer.getMappedRange());
+    const result = new Uint8Array(width * height * bytesPerPixel);
 
-  // 7. Cleanup
-  readBuffer.unmap();
-  readBuffer.destroy();
+    // Strip alignment padding — copy only the valid pixel bytes per row
+    for (let y = 0; y < height; y++) {
+        result.set(
+            raw.subarray(y * paddedPerRow, y * paddedPerRow + unpaddedPerRow),
+            y * unpaddedPerRow
+        );
+    }
+
+    readBuffer.unmap();
+    readBuffer.destroy();
+    return result;
+}
+
+// ── bytesToPng ─────────────────────────────────────────────────────────────────
+// Encodes raw RGBA pixel bytes to a PNG Uint8Array via Canvas2D.
+// Separated from textureToBytes so callers can do BGRA→RGBA swapping in between
+// (needed for bgra8unorm textures on Windows/Chrome before PNG encoding).
+
+export function bytesToPng(
+    pixels: Uint8Array,
+    width:  number,
+    height: number
+): Promise<Uint8Array> {
+    return new Promise((resolve, reject) => {
+        const canvas = document.createElement('canvas');
+        canvas.width  = width;
+        canvas.height = height;
+        const ctx     = canvas.getContext('2d')!;
+        const img     = ctx.createImageData(width, height);
+        img.data.set(pixels);
+        ctx.putImageData(img, 0, 0);
+
+        // toBlob is faster than toDataURL — no base64 encoding round-trip
+        canvas.toBlob(blob => {
+            if (!blob) { reject(new Error('canvas.toBlob returned null')); return; }
+            blob.arrayBuffer()
+                .then(buf => resolve(new Uint8Array(buf)))
+                .catch(reject);
+        }, 'image/png');
+    });
+}
+
+// ── downloadTexture ────────────────────────────────────────────────────────────
+// Public API kept identical to existing callers.
+// Internally uses textureToBytes + bytesToPng for consistency with the export
+// pipeline, and triggers download via URL.createObjectURL (faster than toDataURL).
+
+export async function downloadTexture(
+    device:   GPUDevice,
+    texture:  GPUTexture,
+    fileName: string = 'drawing.png'
+): Promise<void> {
+    const pixels = await textureToBytes(device, texture);
+    const png    = await bytesToPng(pixels, texture.width, texture.height);
+
+    const blob = new Blob([png], { type: 'image/png' });
+    const link = document.createElement('a');
+    link.download = fileName;
+    link.href     = URL.createObjectURL(blob);
+    link.click();
+    URL.revokeObjectURL(link.href);
 }
