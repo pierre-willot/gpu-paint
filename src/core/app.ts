@@ -411,6 +411,7 @@ export class PaintApp {
     public clearLayer(): void { this._activeTool.reset(this.pipeline); this.pipeline.clear(); }
 
     public selectAll(): void {
+        this.pipeline.selectAll();   // pre-apply — applyCommand skips selection commands
         this.history.execute({
             type: 'selection', label: 'Selection',
             operation: 'selectAll', selMode: 'replace',
@@ -419,6 +420,7 @@ export class PaintApp {
     }
 
     public deselect(): void {
+        this.pipeline.deselect();
         this.history.execute({
             type: 'selection', label: 'Selection',
             operation: 'deselect', selMode: 'replace',
@@ -427,6 +429,7 @@ export class PaintApp {
     }
 
     public invertSelection(): void {
+        this.pipeline.invertSelection();
         this.history.execute({
             type: 'selection', label: 'Selection',
             operation: 'invertSelection', selMode: 'replace',
@@ -443,7 +446,12 @@ export class PaintApp {
         if (this.pipeline.selectionManager.hasMask) {
             const mask = this.pipeline.selectionManager.getMaskData();
             for (let i = 0; i < mask.length; i++) {
-                if (mask[i] === 0) pixels[i * 4 + 3] = 0;
+                if (mask[i] === 0) {
+                    pixels[i * 4]     = 0;
+                    pixels[i * 4 + 1] = 0;
+                    pixels[i * 4 + 2] = 0;
+                    pixels[i * 4 + 3] = 0;
+                }
             }
         }
         this.clipboard = { pixels };
@@ -458,8 +466,19 @@ export class PaintApp {
         if (this.pipeline.selectionManager.hasMask) {
             const mask = this.pipeline.selectionManager.getMaskData();
             for (let i = 0; i < mask.length; i++) {
-                if (mask[i] > 0)  afterCut[i * 4 + 3] = 0;  // clear selected
-                else              pixels[i * 4 + 3]   = 0;  // clipboard: keep only selected
+                if (mask[i] > 0) {
+                    // Clear selected pixels from the layer after cut
+                    afterCut[i * 4]     = 0;
+                    afterCut[i * 4 + 1] = 0;
+                    afterCut[i * 4 + 2] = 0;
+                    afterCut[i * 4 + 3] = 0;
+                } else {
+                    // Clipboard keeps only the selected region — zero unselected
+                    pixels[i * 4]     = 0;
+                    pixels[i * 4 + 1] = 0;
+                    pixels[i * 4 + 2] = 0;
+                    pixels[i * 4 + 3] = 0;
+                }
             }
         } else {
             // No selection: copy full layer, clear full layer
