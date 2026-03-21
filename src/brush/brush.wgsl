@@ -158,7 +158,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         alpha_base = mix(gaussian, hard_mask, in.hardness);
     }
 
-    let alpha = alpha_base * in.color.a * mask_val;
+    var alpha = alpha_base * in.color.a * mask_val;
 
     // ── Color + grain ─────────────────────────────────────────────────────
     var finalColor = in.color.rgb;
