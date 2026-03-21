@@ -439,6 +439,7 @@
       <div class="bs-tool-title" id="bs-tool-title">Brush</div>
       <button class="btn-ghost bs-close-btn" id="bsCloseBtn" title="Close">✕</button>
     </div>
+    <canvas id="bs-stroke-preview" width="216" height="36" title="Live stroke preview — updates as you change settings"></canvas>
 
     <!-- ── Painting tools (brush / eraser / smudge) ── -->
     <div id="bs-painting-section">
@@ -460,6 +461,9 @@
           <div class="bs-row" title="Fixed stamp rotation in degrees"><span class="bs-label">Angle</span><input type="range" class="slider bs-sl" id="bs-angle" min="0" max="360" value="0"><input type="text" class="bs-val txt-field" id="bs-angle-val" value="0°" maxlength="4"></div>
           <div class="bs-row" title="Input smoothing reduces shakiness. 0=raw input, 100=maximum smoothing"><span class="bs-label">Smoothing</span><input type="range" class="slider bs-sl" id="bs-smoothing" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-smoothing-val" value="0%" maxlength="4"></div>
           <div class="bs-chk-row" id="bs-follow-stroke-row" title="Stamp angle automatically rotates to follow the stroke direction"><span class="bs-chk-lbl">Follow Stroke</span><div class="toggle-switch" id="bs-follow-stroke" title="Stamp angle follows stroke direction"></div></div>
+          <div class="bs-sub-label" style="margin-top:6px">ROUNDNESS DYNAMICS</div>
+          <div id="bs-roundness-tilt-curve-container" style="margin:4px 0 2px"></div>
+          <div id="bs-roundness-pressure-curve-container" style="margin:4px 0 6px"></div>
           <div class="bs-row" title="Minimum roundness when tilt squishes the ellipse"><span class="bs-label">Round Min</span><input type="range" class="slider bs-sl" id="bs-roundness-min" min="0" max="100" value="5"><input type="text" class="bs-val txt-field" id="bs-roundness-min-val" value="5%" maxlength="4"></div>
           <div class="bs-row" title="How much pen tilt azimuth controls stamp rotation (0=none, 100=full)"><span class="bs-label">Tilt Angle</span><input type="range" class="slider bs-sl" id="bs-tilt-influence" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-tilt-influence-val" value="0%" maxlength="4"></div>
           <div class="bs-chk-row" title="Pen tilt squishes the stamp roundness proportionally"><span class="bs-chk-lbl">Tilt Shape</span><div class="toggle-switch on" id="bs-tilt-shape" title="Tilt squishes roundness"></div></div>
@@ -501,6 +505,7 @@
           <div class="bs-row" title="Random size variation per stamp (0=uniform, 100=fully random)"><span class="bs-label">Size</span><input type="range" class="slider bs-sl" id="bs-size-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-size-jitter-val" value="0%" maxlength="4"></div>
           <div class="bs-row" title="Random opacity variation per stamp"><span class="bs-label">Opacity</span><input type="range" class="slider bs-sl" id="bs-opac-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-opac-jitter-val" value="0%" maxlength="4"></div>
           <div class="bs-row" title="Random stamp angle jitter in degrees per stamp"><span class="bs-label">Ang Jit</span><input type="range" class="slider bs-sl" id="bs-angle-jitter" min="0" max="180" value="0"><input type="text" class="bs-val txt-field" id="bs-angle-jitter-val" value="0°" maxlength="4"></div>
+          <div id="bs-scatter-pressure-curve-container" style="margin:4px 0 6px"></div>
           <div class="bs-row" title="Position scatter range on the X axis (canvas units)"><span class="bs-label">Scat X</span><input type="range" class="slider bs-sl" id="bs-scatter-x" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-scatter-x-val" value="0%" maxlength="4"></div>
           <div class="bs-row" title="Position scatter range on the Y axis (canvas units)"><span class="bs-label">Scat Y</span><input type="range" class="slider bs-sl" id="bs-scatter-y" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-scatter-y-val" value="0%" maxlength="4"></div>
           <div class="bs-row" title="Number of stamps emitted per spacing step"><span class="bs-label">Count</span><input type="range" class="slider bs-sl" id="bs-stamp-count" min="1" max="16" value="1"><input type="text" class="bs-val txt-field" id="bs-stamp-count-val" value="1" maxlength="2"></div>
@@ -520,6 +525,7 @@
             <div class="bs-row" title="Random saturation shift per stamp"><span class="bs-label">Sat Jit</span><input type="range" class="slider bs-sl" id="bs-sat-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-sat-jitter-val" value="0%" maxlength="4"></div>
             <div class="bs-row" title="Random brightness shift per stamp"><span class="bs-label">Val Jit</span><input type="range" class="slider bs-sl" id="bs-val-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-val-jitter-val" value="0%" maxlength="4"></div>
             <div class="bs-row" title="Mix between foreground (left) and secondary color (right)"><span class="bs-label">Fg/Bg</span><input type="range" class="slider bs-sl" id="bs-fg-bg-mix" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-fg-bg-mix-val" value="0%" maxlength="4"></div>
+            <div id="bs-color-mix-curve-container" style="margin:4px 0 6px"></div>
             <div class="bs-sub-label">Per Stroke</div>
             <div class="bs-row" title="Random hue shift applied once at stroke start, constant for the whole stroke"><span class="bs-label">Hue Jit</span><input type="range" class="slider bs-sl" id="bs-hue-jitter-ps" min="0" max="180" value="0"><input type="text" class="bs-val txt-field" id="bs-hue-jitter-ps-val" value="0°" maxlength="4"></div>
             <div class="bs-row" title="Same but for saturation/brightness"><span class="bs-label">Sat Jit</span><input type="range" class="slider bs-sl" id="bs-sat-jitter-ps" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-sat-jitter-ps-val" value="0%" maxlength="4"></div>
@@ -567,6 +573,7 @@
           <summary class="bs-card-hd">Texture</summary>
           <div class="bs-card-bd">
             <div class="bs-row" title="How strongly the texture modulates brush color (0=no texture, 100=full texture)"><span class="bs-label">Depth</span><input type="range" class="slider bs-sl" id="bs-grain-depth" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-grain-depth-val" value="0%" maxlength="4"></div>
+            <div id="bs-grain-depth-curve-container" style="margin:4px 0 6px"></div>
             <div class="bs-row" title="Texture zoom — lower=zoomed in, higher=tiled"><span class="bs-label">Scale</span><input type="range" class="slider bs-sl" id="bs-grain-scale" min="10" max="400" value="100"><input type="text" class="bs-val txt-field" id="bs-grain-scale-val" value="1.0" maxlength="4"></div>
             <div class="bs-row" title="Texture rotation angle in degrees"><span class="bs-label">Rotation</span><input type="range" class="slider bs-sl" id="bs-grain-rotation" min="0" max="360" value="0"><input type="text" class="bs-val txt-field" id="bs-grain-rotation-val" value="0°" maxlength="4"></div>
             <div class="bs-row" title="Texture contrast multiplier (0.5=flat, 2.0=high contrast)"><span class="bs-label">Contrast</span><input type="range" class="slider bs-sl" id="bs-grain-contrast" min="50" max="300" value="100"><input type="text" class="bs-val txt-field" id="bs-grain-contrast-val" value="1.0" maxlength="4"></div>

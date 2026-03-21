@@ -14,7 +14,7 @@ import { FocusMode }            from './ui/overlays/focus-mode';
 import { PressureCurveUI }      from './ui/panels/pressure-curve-ui';
 import { CanvasSizeDialog }      from './ui/panels/canvas-size-dialog';
 import { BrushPresets }         from './core/brush-presets';
-import { BrushPanel }           from './ui/panels/brush-panel';
+import { BrushPanel, drawPreview } from './ui/panels/brush-panel';
 import { CurveEditor }          from './ui/panels/curve-editor';
 import './style.css';
 
@@ -290,8 +290,19 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         brushPanel.refreshPreview(id, desc);
     };
 
+    // ── Live stroke preview ────────────────────────────────────────────────────
+    const previewCanvas = document.getElementById('bs-stroke-preview') as HTMLCanvasElement | null;
+    let previewTimer: ReturnType<typeof setTimeout> | null = null;
+    const schedulePreview = () => {
+        if (!previewCanvas) return;
+        if (previewTimer) clearTimeout(previewTimer);
+        previewTimer = setTimeout(() => {
+            drawPreview(previewCanvas, app.brushTool.getDescriptor());
+        }, 60);
+    };
+
     /** Push descriptor to worker and save to active preset. */
-    const pushBrush = () => { app.brushTool.pushDescriptor(); notifyBrushChange(); };
+    const pushBrush = () => { app.brushTool.pushDescriptor(); notifyBrushChange(); schedulePreview(); };
 
     // ── Binding helpers ───────────────────────────────────────────────────────
 
@@ -320,19 +331,29 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
 
     // ── Pressure curve editors ────────────────────────────────────────────────
 
-    let sizeCurveEditor:        CurveEditor | null = null;
-    let sizeTiltCurveEditor:    CurveEditor | null = null;
-    let sizeSpeedCurveEditor:   CurveEditor | null = null;
-    let opacityCurveEditor:     CurveEditor | null = null;
-    let opacitySpeedCurveEditor: CurveEditor | null = null;
-    let flowCurveEditor:        CurveEditor | null = null;
+    let sizeCurveEditor:             CurveEditor | null = null;
+    let sizeTiltCurveEditor:         CurveEditor | null = null;
+    let sizeSpeedCurveEditor:        CurveEditor | null = null;
+    let opacityCurveEditor:          CurveEditor | null = null;
+    let opacitySpeedCurveEditor:     CurveEditor | null = null;
+    let flowCurveEditor:             CurveEditor | null = null;
+    let roundnessTiltCurveEditor:    CurveEditor | null = null;
+    let roundnessPressureCurveEditor: CurveEditor | null = null;
+    let scatterPressureCurveEditor:  CurveEditor | null = null;
+    let grainDepthCurveEditor:       CurveEditor | null = null;
+    let colorMixCurveEditor:         CurveEditor | null = null;
 
-    const sizeCurveContainer         = document.getElementById('bs-size-curve-container');
-    const sizeTiltCurveContainer     = document.getElementById('bs-size-tilt-curve-container');
-    const sizeSpeedCurveContainer    = document.getElementById('bs-size-speed-curve-container');
-    const opacityCurveContainer      = document.getElementById('bs-opacity-curve-container');
-    const opacitySpeedCurveContainer = document.getElementById('bs-opacity-speed-curve-container');
-    const flowCurveContainer         = document.getElementById('bs-flow-curve-container');
+    const sizeCurveContainer              = document.getElementById('bs-size-curve-container');
+    const sizeTiltCurveContainer          = document.getElementById('bs-size-tilt-curve-container');
+    const sizeSpeedCurveContainer         = document.getElementById('bs-size-speed-curve-container');
+    const opacityCurveContainer           = document.getElementById('bs-opacity-curve-container');
+    const opacitySpeedCurveContainer      = document.getElementById('bs-opacity-speed-curve-container');
+    const flowCurveContainer              = document.getElementById('bs-flow-curve-container');
+    const roundnessTiltCurveContainer     = document.getElementById('bs-roundness-tilt-curve-container');
+    const roundnessPressureCurveContainer = document.getElementById('bs-roundness-pressure-curve-container');
+    const scatterPressureCurveContainer   = document.getElementById('bs-scatter-pressure-curve-container');
+    const grainDepthCurveContainer        = document.getElementById('bs-grain-depth-curve-container');
+    const colorMixCurveContainer          = document.getElementById('bs-color-mix-curve-container');
 
     const makeEditor = (label: string, onChange: (s: any) => void) =>
         new CurveEditor({ width: 120, height: 70, label, onChange });
@@ -360,6 +381,26 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
     if (flowCurveContainer) {
         flowCurveEditor = makeEditor('Pressure → Flow', (spec) => { app.brushTool.getDescriptor().flowPressureCurve = spec; pushBrush(); });
         flowCurveContainer.appendChild(flowCurveEditor.el);
+    }
+    if (roundnessTiltCurveContainer) {
+        roundnessTiltCurveEditor = makeEditor('Tilt → Roundness', (spec) => { app.brushTool.getDescriptor().roundnessTiltCurve = spec; pushBrush(); });
+        roundnessTiltCurveContainer.appendChild(roundnessTiltCurveEditor.el);
+    }
+    if (roundnessPressureCurveContainer) {
+        roundnessPressureCurveEditor = makeEditor('Pressure → Roundness', (spec) => { app.brushTool.getDescriptor().roundnessPressureCurve = spec; pushBrush(); });
+        roundnessPressureCurveContainer.appendChild(roundnessPressureCurveEditor.el);
+    }
+    if (scatterPressureCurveContainer) {
+        scatterPressureCurveEditor = makeEditor('Pressure → Scatter', (spec) => { app.brushTool.getDescriptor().scatterPressureCurve = spec; pushBrush(); });
+        scatterPressureCurveContainer.appendChild(scatterPressureCurveEditor.el);
+    }
+    if (grainDepthCurveContainer) {
+        grainDepthCurveEditor = makeEditor('Pressure → Grain', (spec) => { app.brushTool.getDescriptor().grainDepthCurve = spec; pushBrush(); });
+        grainDepthCurveContainer.appendChild(grainDepthCurveEditor.el);
+    }
+    if (colorMixCurveContainer) {
+        colorMixCurveEditor = makeEditor('Pressure → Color Mix', (spec) => { app.brushTool.getDescriptor().colorMixPressureCurve = spec; pushBrush(); });
+        colorMixCurveContainer.appendChild(colorMixCurveEditor.el);
     }
 
     // ── Existing controls ─────────────────────────────────────────────────────
@@ -715,6 +756,11 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         opacityCurveEditor?.setSpec(d.opacityPressureCurve);
         opacitySpeedCurveEditor?.setSpec(d.opacitySpeedCurve);
         flowCurveEditor?.setSpec(d.flowPressureCurve);
+        roundnessTiltCurveEditor?.setSpec(d.roundnessTiltCurve);
+        roundnessPressureCurveEditor?.setSpec(d.roundnessPressureCurve);
+        scatterPressureCurveEditor?.setSpec(d.scatterPressureCurve);
+        grainDepthCurveEditor?.setSpec(d.grainDepthCurve);
+        colorMixCurveEditor?.setSpec(d.colorMixPressureCurve);
 
         // Scatter
         set('bs-angle-jitter', Math.round(d.angleJitter));  setTxt('bs-angle-jitter-val', Math.round(d.angleJitter) + '°');
@@ -782,6 +828,7 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
             (id, i) => document.getElementById(id)?.classList.toggle('active', i === blendIdx)
         );
         syncGrainConfig();
+        schedulePreview();
     };
 
     app.bus.on('tool:change', ({ tool }) => {
