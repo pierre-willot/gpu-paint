@@ -10,12 +10,20 @@ self.onmessage = (e: MessageEvent) => {
     switch (msg.type) {
 
         case 'set_descriptor': {
-            engine.setDescriptor(msg.descriptor as BrushDescriptor);
+            const d = msg.descriptor as BrushDescriptor;
+            engine.setDescriptor(d);
+            // Sync smoothing from descriptor so it doesn't need a separate message
+            engine.smoothingStrength = d.smoothing ?? 0;
             break;
         }
 
         case 'set_pressure_lut': {
             engine.setPressureLUT(msg.lut as Float32Array);
+            break;
+        }
+
+        case 'set_dynamics_luts': {
+            engine.setDynamicsLUTs(msg.packed as Float32Array);
             break;
         }
 
@@ -52,8 +60,20 @@ self.onmessage = (e: MessageEvent) => {
         }
 
         case 'flush_final': {
-            const finalStamps = engine.flush();
+            const safeStamps = engine.flush();
+            const tailStamps = engine.flushTail();
             engine.endStroke();
+            // Combine safe + taper-faded tail into one buffer
+            let finalStamps: Float32Array;
+            if (safeStamps.length === 0) {
+                finalStamps = tailStamps;
+            } else if (tailStamps.length === 0) {
+                finalStamps = safeStamps;
+            } else {
+                finalStamps = new Float32Array(safeStamps.length + tailStamps.length);
+                finalStamps.set(safeStamps, 0);
+                finalStamps.set(tailStamps, safeStamps.length);
+            }
             self.postMessage({ type: 'final', data: finalStamps }, [finalStamps.buffer]);
             break;
         }

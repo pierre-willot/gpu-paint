@@ -38,6 +38,7 @@
       <div class="dropdown" id="menuFile">
         <div class="drop-item" id="menu-new"><span>New</span><span class="drop-shortcut">⌘N</span></div>
         <div class="drop-item" id="menu-open"><span>Open</span><span class="drop-shortcut">⌘O</span></div>
+        <div class="drop-item" id="menu-import"><span>Import Image…</span><span class="drop-shortcut">⌘I</span></div>
         <div class="drop-sep"></div>
         <div class="drop-item" id="menu-save"><span>Save Session</span><span class="drop-shortcut">⌘S</span></div>
         <div class="drop-item" id="menu-save-project"><span>Save As .gpaint…</span><span class="drop-shortcut">⇧⌘S</span></div>
@@ -90,11 +91,25 @@
         <div class="drop-item" id="menu-zoom-out"><span>Zoom Out</span><span class="drop-shortcut">⌘−</span></div>
         <div class="drop-item" id="menu-zoom-fit"><span>Fit to Screen</span><span class="drop-shortcut">⌘0</span></div>
         <div class="drop-sep"></div>
-        <div class="drop-item" id="menu-rotate-cw"><span>Rotate Clockwise</span><span class="drop-shortcut">R</span></div>
-        <div class="drop-item" id="menu-rotate-ccw"><span>Rotate Counter-CW</span><span class="drop-shortcut">⇧R</span></div>
+        <div class="drop-item" id="menu-rotate-cw"><span>Rotate Clockwise</span></div>
+        <div class="drop-item" id="menu-rotate-ccw"><span>Rotate Counter-CW</span></div>
         <div class="drop-item" id="menu-reset-rotation"><span>Reset Rotation</span></div>
         <div class="drop-sep"></div>
         <div class="drop-item" id="menu-focus"><span>Focus Mode</span><span class="drop-shortcut">Tab</span></div>
+      </div>
+    </div>
+
+    <div class="menu-item-wrap">
+      <button class="menu-btn" id="btnWindow">Window</button>
+      <div class="dropdown" id="menuWindow">
+        <div class="drop-item" id="menu-window-brushes"><span>Tool Group</span></div>
+        <div class="drop-item" id="menu-window-brush-settings"><span>Tool Settings</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item" id="menu-window-layers"><span>Layers</span></div>
+        <div class="drop-item" id="menu-window-color"><span>Color Picker</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item" id="menu-window-prefs"><span>Preferences</span></div>
+        <div class="drop-item" id="menu-window-export"><span>Export</span></div>
       </div>
     </div>
 
@@ -152,7 +167,7 @@
         <path d="M11 3C11 3 6 9.5 6 14C6 17 8.2 19.5 11 19.5C13.8 19.5 16 17 16 14C16 9.5 11 3 11 3Z"/>
         <ellipse cx="9" cy="13" rx="1.2" ry="2.4" fill="rgba(255,255,255,0.35)" transform="rotate(-15 9 13)"/>
       </svg>
-      <span class="tool-tip">Smudge (coming soon)</span>
+      <span class="tool-tip">Smudge (W)</span>
     </button>
 
     <!-- Fill (placeholder — Tier B) -->
@@ -165,22 +180,6 @@
       <span class="tool-tip">Fill (coming soon)</span>
     </button>
 
-    <div class="divider"></div>
-
-    <!-- Eyedropper -->
-    <button class="btn-ghost tool-btn" data-tool="eyedropper" id="toolEyedropper">
-      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-        <circle cx="11" cy="11" r="9" stroke="currentColor" stroke-width="1.5"/>
-        <circle cx="11" cy="11" r="5.5" stroke="currentColor" stroke-width="1.5"/>
-        <circle cx="11" cy="11" r="1.8" fill="currentColor"/>
-        <line x1="11" y1="1" x2="11" y2="4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="11" y1="17.5" x2="11" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="1" y1="11" x2="4.5" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="17.5" y1="11" x2="21" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-      </svg>
-      <span class="tool-tip">Eyedropper (I)</span>
-    </button>
-
     <!-- Selection (placeholder — Tier C) -->
     <button class="btn-ghost tool-btn" data-tool="select" id="toolSelect">
       <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
@@ -190,7 +189,26 @@
         <circle cx="3" cy="18" r="1.5" fill="currentColor"/>
         <circle cx="19" cy="18" r="1.5" fill="currentColor"/>
       </svg>
-      <span class="tool-tip">Selection (coming soon)</span>
+      <span class="tool-tip">Selection (M)</span>
+    </button>
+
+    <!-- Transform -->
+    <button class="btn-ghost tool-btn" data-tool="transform" id="toolTransform">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <!-- vertical shaft -->
+        <line x1="11" y1="3" x2="11" y2="19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <!-- horizontal shaft -->
+        <line x1="3" y1="11" x2="19" y2="11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <!-- up arrow -->
+        <polyline points="8.5,5.5 11,3 13.5,5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <!-- down arrow -->
+        <polyline points="8.5,16.5 11,19 13.5,16.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <!-- left arrow -->
+        <polyline points="5.5,8.5 3,11 5.5,13.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <!-- right arrow -->
+        <polyline points="16.5,8.5 19,11 16.5,13.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <span class="tool-tip">Transform (T) — Enter to apply · Esc to cancel</span>
     </button>
 
     <div class="divider"></div>
@@ -223,6 +241,86 @@
   <span class="save-status" id="save-status"></span>
 
 </header>
+
+<!-- ═══ TOOL GROUP PANEL ═══ -->
+<div class="float-panel brush-panel" id="brushPanel" style="display:none;left:110px;">
+  <div class="panel-pill"></div>
+  <div class="bp-header">
+    <span class="bp-title" id="bp-title">Brushes</span>
+    <div class="bp-toolbar" id="bp-brush-toolbar">
+      <button class="btn-ghost bp-tb-btn" id="bp-save-btn" title="Save current brush as new preset">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+          <line x1="7" y1="1" x2="7" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="4" y1="7" x2="7" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="7" x2="7" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="2" y1="13" x2="12" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button class="btn-ghost bp-tb-btn" id="bp-import-btn" title="Import preset from .json">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+          <line x1="7" y1="10" x2="7" y2="1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="4" y1="4" x2="7" y2="1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="4" x2="7" y2="1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="2" y1="13" x2="12" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button class="btn-ghost bp-tb-btn" id="bp-export-btn" title="Export selected preset">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+          <line x1="7" y1="1" x2="7" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="4" y1="7" x2="7" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="7" x2="7" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M2 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <text x="7" y="4" text-anchor="middle" fill="currentColor" font-size="5" font-family="sans-serif">1</text>
+        </svg>
+      </button>
+      <button class="btn-ghost bp-tb-btn" id="bp-export-all-btn" title="Export all presets">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+          <line x1="7" y1="1" x2="7" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="4" y1="4.5" x2="7" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="4.5" x2="7" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="7" y1="5" x2="7" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="1.5 1.5"/>
+          <path d="M2 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Brush variations (presets list) -->
+  <div id="tg-brush-section">
+    <div class="bp-list" id="bp-list"></div>
+    <div class="bp-footer">
+      <button class="btn-ghost bp-footer-btn" id="bp-restore-btn">Restore Defaults</button>
+    </div>
+  </div>
+
+  <!-- Eraser variations -->
+  <div id="tg-eraser-section" style="display:none">
+    <div class="bp-list" id="tg-eraser-list"></div>
+  </div>
+
+  <!-- Smudge variations -->
+  <div id="tg-smudge-section" style="display:none">
+    <div class="bp-list" id="tg-smudge-list"></div>
+  </div>
+
+  <!-- Selection type variations -->
+  <div id="tg-selection-section" style="display:none;padding:10px 8px 8px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+      <button class="btn-ghost sel-btn active" id="tg-selTypeRect" style="flex-direction:column;gap:5px;height:56px;font-size:11px;">
+        <svg width="20" height="16" viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5 1.5"/></svg>
+        Rectangle
+      </button>
+      <button class="btn-ghost sel-btn" id="tg-selTypeLasso" style="flex-direction:column;gap:5px;height:56px;font-size:11px;">
+        <svg width="20" height="16" viewBox="0 0 14 14" fill="none"><path d="M7 2C4 2 2 4.5 2 7C2 9.5 4 11 6 11.5L7 12.5L8 11.5C10.5 10.5 12 8.5 12 7C12 4.2 9.5 2 7 2Z" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5 1.5" fill="none"/></svg>
+        Lasso
+      </button>
+      <button class="btn-ghost sel-btn" id="tg-selTypePoly" style="flex-direction:column;gap:5px;height:56px;font-size:11px;">
+        <svg width="20" height="16" viewBox="0 0 14 14" fill="none"><polygon points="7,1.5 12.5,5 10.5,12 3.5,12 1.5,5" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5 1.5" fill="none"/></svg>
+        Polygon
+      </button>
+    </div>
+  </div>
+</div>
 
 <!-- ═══ SELECTION POPUP (visual placeholder) ═══ -->
 <div class="selection-popup" id="selectionPopup">
@@ -260,7 +358,7 @@
     </div>
     <div class="vert-slider-wrap">
       <!-- id=sizeSlider, min/max normalized 0.005–0.15 -->
-      <input type="range" class="vert-slider" id="sizeSlider" min="0.005" max="0.15" step="0.001" value="0.05">
+      <input type="range" class="vert-slider" id="sizeSlider" min="0.005" max="0.375" step="0.001" value="0.05">
     </div>
     <div class="action-pair">
       <button class="btn-ghost act-btn" id="undoBtn" title="Undo (⌘Z)" disabled>
@@ -333,26 +431,180 @@
   <div class="layer-list" id="layer-list"></div>
 </div>
 
-<!-- ═══ BRUSH SETTINGS PANEL ═══ -->
-<div class="float-panel brush-settings-panel" id="brushSettingsPanel" style="display:none;left:110px;">
+<!-- ═══ TOOL SETTINGS PANEL ═══ -->
+<div class="float-panel brush-settings-panel" id="brushSettingsPanel" style="display:none;left:320px;">
   <div class="panel-pill"></div>
   <div class="bs-body">
-    <div>
-      <div class="bs-section-label">Basic</div>
-      <div class="bs-row"><span class="bs-label">Opacity</span><input type="range" class="slider" id="bs-opacity" style="flex:1;min-width:0;height:16px;" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-opacity-val" value="100%" maxlength="4"></div>
-      <div class="bs-row"><span class="bs-label">Flow</span><input type="range" class="slider" id="bs-flow" style="flex:1;min-width:0;height:16px;" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-flow-val" value="100%" maxlength="4"></div>
-      <div class="bs-row"><span class="bs-label">Hardness</span><input type="range" class="slider" id="bs-hardness" style="flex:1;min-width:0;height:16px;" min="0" max="100" value="95"><input type="text" class="bs-val txt-field" id="bs-hardness-val" value="95%" maxlength="4"></div>
-      <div class="bs-row"><span class="bs-label">Spacing</span><input type="range" class="slider" id="bs-spacing" style="flex:1;min-width:0;height:16px;" min="1" max="200" value="35"><input type="text" class="bs-val txt-field" id="bs-spacing-val" value="35%" maxlength="4"></div>
+    <div class="bs-panel-header">
+      <div class="bs-tool-title" id="bs-tool-title">Brush</div>
+      <button class="btn-ghost bs-close-btn" id="bsCloseBtn" title="Close">✕</button>
     </div>
-    <div>
-      <div class="bs-section-label">Dynamics</div>
-      <div class="bs-toggle-row"><span class="bs-label" style="font-size:12px;color:var(--text-2)">Color Jitter</span><div class="toggle-switch" id="bs-toggle-jitter" onclick="this.classList.toggle('on')"></div></div>
-      <div class="bs-toggle-row" style="margin-top:8px"><span class="bs-label" style="font-size:12px;color:var(--text-2)">Dual Brush</span><div class="toggle-switch" id="bs-toggle-dual" onclick="this.classList.toggle('on')"></div></div>
+
+    <!-- ── Painting tools (brush / eraser / smudge) ── -->
+    <div id="bs-painting-section">
+
+      <!-- Core: Opacity / Flow / Mix — always visible -->
+      <div class="bs-top-rows">
+        <div class="bs-row" title="Overall transparency of each stamp (0=invisible, 100=fully opaque)"><span class="bs-label">Opacity</span><input type="range" class="slider bs-sl" id="bs-opacity" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-opacity-val" value="100%" maxlength="4"></div>
+        <div class="bs-row" id="bs-flow-row" title="Paint density per stamp. Low flow builds up paint gradually with overlapping strokes"><span class="bs-label">Flow</span><input type="range" class="slider bs-sl" id="bs-flow" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-flow-val" value="100%" maxlength="4"></div>
+        <div class="bs-row" id="bs-mix-row" title="Smudge strength — how far it drags existing paint"><span class="bs-label" id="bs-mix-label">Mix</span><input type="range" class="slider bs-sl" id="bs-mix" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-mix-val" value="0%" maxlength="4"></div>
+      </div>
+
+      <!-- Shape -->
+      <details class="bs-card" open>
+        <summary class="bs-card-hd">Shape</summary>
+        <div class="bs-card-bd">
+          <div class="bs-row" title="Edge softness. 0=soft gaussian falloff, 100=sharp hard edge"><span class="bs-label">Hardness</span><input type="range" class="slider bs-sl" id="bs-hardness" min="0" max="100" value="95"><input type="text" class="bs-val txt-field" id="bs-hardness-val" value="95%" maxlength="4"></div>
+          <div class="bs-row" title="Gap between stamps as % of brush diameter. Low=continuous stroke, high=dotted"><span class="bs-label">Spacing</span><input type="range" class="slider bs-sl" id="bs-spacing" min="0.5" max="30" step="0.5" value="10"><input type="text" class="bs-val txt-field" id="bs-spacing-val" value="10%" maxlength="5"></div>
+          <div class="bs-row" title="Ellipse ratio. 100=circle, lower=elongated ellipse"><span class="bs-label">Roundness</span><input type="range" class="slider bs-sl" id="bs-roundness" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-roundness-val" value="100%" maxlength="4"></div>
+          <div class="bs-row" title="Fixed stamp rotation in degrees"><span class="bs-label">Angle</span><input type="range" class="slider bs-sl" id="bs-angle" min="0" max="360" value="0"><input type="text" class="bs-val txt-field" id="bs-angle-val" value="0°" maxlength="4"></div>
+          <div class="bs-row" title="Input smoothing reduces shakiness. 0=raw input, 100=maximum smoothing"><span class="bs-label">Smoothing</span><input type="range" class="slider bs-sl" id="bs-smoothing" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-smoothing-val" value="0%" maxlength="4"></div>
+          <div class="bs-chk-row" id="bs-follow-stroke-row" title="Stamp angle automatically rotates to follow the stroke direction"><span class="bs-chk-lbl">Follow Stroke</span><div class="toggle-switch" id="bs-follow-stroke" title="Stamp angle follows stroke direction"></div></div>
+          <div class="bs-row" title="Minimum roundness when tilt squishes the ellipse"><span class="bs-label">Round Min</span><input type="range" class="slider bs-sl" id="bs-roundness-min" min="0" max="100" value="5"><input type="text" class="bs-val txt-field" id="bs-roundness-min-val" value="5%" maxlength="4"></div>
+          <div class="bs-row" title="How much pen tilt azimuth controls stamp rotation (0=none, 100=full)"><span class="bs-label">Tilt Angle</span><input type="range" class="slider bs-sl" id="bs-tilt-influence" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-tilt-influence-val" value="0%" maxlength="4"></div>
+          <div class="bs-chk-row" title="Pen tilt squishes the stamp roundness proportionally"><span class="bs-chk-lbl">Tilt Shape</span><div class="toggle-switch on" id="bs-tilt-shape" title="Tilt squishes roundness"></div></div>
+          <div class="bs-sub-label">Tip Texture</div>
+          <div class="bs-chk-row"><span class="bs-chk-lbl" id="bs-tip-name" style="font-size:9px;color:var(--text-3)">Procedural (none)</span><button class="btn-ghost" id="bs-tip-load-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px">Load</button></div>
+          <div class="bs-chk-row" id="bs-tip-clear-row" style="display:none"><button class="btn-ghost" id="bs-tip-clear-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px;width:100%">Clear tip texture</button></div>
+        </div>
+      </details>
+
+      <!-- Dynamics -->
+      <details class="bs-card" id="bs-pressure-section" open>
+        <summary class="bs-card-hd">Dynamics</summary>
+        <div class="bs-card-bd">
+          <div class="bs-sub-label" style="margin-top:4px">SIZE DYNAMICS</div>
+          <div id="bs-size-curve-container" style="margin:4px 0 2px"></div>
+          <div id="bs-size-tilt-curve-container" style="margin:4px 0 2px"></div>
+          <div id="bs-size-speed-curve-container" style="margin:4px 0 6px"></div>
+          <div class="bs-row" title="Linear pressure→size sensitivity (overridden by SIZE DYNAMICS curve when active)"><span class="bs-label">Size</span><input type="range" class="slider bs-sl" id="bs-pres-size" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-pres-size-val" value="0%" maxlength="4"></div>
+          <div class="bs-sub-label" style="margin-top:6px">OPACITY DYNAMICS</div>
+          <div id="bs-opacity-curve-container" style="margin:4px 0 2px"></div>
+          <div id="bs-opacity-speed-curve-container" style="margin:4px 0 6px"></div>
+          <div class="bs-row" title="Linear pressure→opacity sensitivity (overridden by OPACITY DYNAMICS curve when active)"><span class="bs-label">Opacity</span><input type="range" class="slider bs-sl" id="bs-pres-opac" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-pres-opac-val" value="0%" maxlength="4"></div>
+          <div class="bs-sub-label" style="margin-top:6px">FLOW DYNAMICS</div>
+          <div id="bs-flow-curve-container" style="margin:4px 0 6px"></div>
+          <div class="bs-row" title="Linear pressure→flow sensitivity (overridden by FLOW DYNAMICS curve when active)"><span class="bs-label">Flow</span><input type="range" class="slider bs-sl" id="bs-pres-flow" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-pres-flow-val" value="0%" maxlength="4"></div>
+          <div class="bs-sub-label">Size Range</div>
+          <div class="bs-row" title="Minimum size multiplier after all dynamics — floor for small pressure"><span class="bs-label">Size Min</span><input type="range" class="slider bs-sl" id="bs-size-min" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-size-min-val" value="0%" maxlength="4"></div>
+          <div class="bs-row" title="Maximum size multiplier — caps the size at light pressure"><span class="bs-label">Size Max</span><input type="range" class="slider bs-sl" id="bs-size-max" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-size-max-val" value="100%" maxlength="4"></div>
+          <div class="bs-sub-label">Opacity Range</div>
+          <div class="bs-row" title="Minimum opacity after all dynamics"><span class="bs-label">Opac Min</span><input type="range" class="slider bs-sl" id="bs-opac-min" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-opac-min-val" value="0%" maxlength="4"></div>
+          <div class="bs-row" title="Maximum opacity after all dynamics"><span class="bs-label">Opac Max</span><input type="range" class="slider bs-sl" id="bs-opac-max" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-opac-max-val" value="100%" maxlength="4"></div>
+        </div>
+      </details>
+
+      <!-- Scatter -->
+      <details class="bs-card" id="bs-scatter-section">
+        <summary class="bs-card-hd">Scatter</summary>
+        <div class="bs-card-bd">
+          <div class="bs-row" title="Random size variation per stamp (0=uniform, 100=fully random)"><span class="bs-label">Size</span><input type="range" class="slider bs-sl" id="bs-size-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-size-jitter-val" value="0%" maxlength="4"></div>
+          <div class="bs-row" title="Random opacity variation per stamp"><span class="bs-label">Opacity</span><input type="range" class="slider bs-sl" id="bs-opac-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-opac-jitter-val" value="0%" maxlength="4"></div>
+          <div class="bs-row" title="Random stamp angle jitter in degrees per stamp"><span class="bs-label">Ang Jit</span><input type="range" class="slider bs-sl" id="bs-angle-jitter" min="0" max="180" value="0"><input type="text" class="bs-val txt-field" id="bs-angle-jitter-val" value="0°" maxlength="4"></div>
+          <div class="bs-row" title="Position scatter range on the X axis (canvas units)"><span class="bs-label">Scat X</span><input type="range" class="slider bs-sl" id="bs-scatter-x" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-scatter-x-val" value="0%" maxlength="4"></div>
+          <div class="bs-row" title="Position scatter range on the Y axis (canvas units)"><span class="bs-label">Scat Y</span><input type="range" class="slider bs-sl" id="bs-scatter-y" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-scatter-y-val" value="0%" maxlength="4"></div>
+          <div class="bs-row" title="Number of stamps emitted per spacing step"><span class="bs-label">Count</span><input type="range" class="slider bs-sl" id="bs-stamp-count" min="1" max="16" value="1"><input type="text" class="bs-val txt-field" id="bs-stamp-count-val" value="1" maxlength="2"></div>
+          <div class="bs-row" title="Random ±N variation in stamp count per step"><span class="bs-label">Cnt Jitter</span><input type="range" class="slider bs-sl" id="bs-stamp-count-jitter" min="0" max="8" value="0"><input type="text" class="bs-val txt-field" id="bs-stamp-count-jitter-val" value="0" maxlength="2"></div>
+          <div class="bs-chk-row" title="Lock jitter seed: same scatter/color pattern every stroke (useful for textured fills)"><span class="bs-chk-lbl">Seed Lock</span><div class="toggle-switch" id="bs-jitter-seed-lock"></div></div>
+        </div>
+      </details>
+
+      <!-- ── Brush-only advanced sections ─────────────────────────────── -->
+      <div id="bs-brush-adv" style="display:none">
+
+        <details class="bs-card">
+          <summary class="bs-card-hd">Color Dynamics</summary>
+          <div class="bs-card-bd">
+            <div class="bs-sub-label">Per Tip</div>
+            <div class="bs-row" title="Random hue shift per stamp (degrees)"><span class="bs-label">Hue Jit</span><input type="range" class="slider bs-sl" id="bs-hue-jitter" min="0" max="180" value="0"><input type="text" class="bs-val txt-field" id="bs-hue-jitter-val" value="0°" maxlength="4"></div>
+            <div class="bs-row" title="Random saturation shift per stamp"><span class="bs-label">Sat Jit</span><input type="range" class="slider bs-sl" id="bs-sat-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-sat-jitter-val" value="0%" maxlength="4"></div>
+            <div class="bs-row" title="Random brightness shift per stamp"><span class="bs-label">Val Jit</span><input type="range" class="slider bs-sl" id="bs-val-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-val-jitter-val" value="0%" maxlength="4"></div>
+            <div class="bs-row" title="Mix between foreground (left) and secondary color (right)"><span class="bs-label">Fg/Bg</span><input type="range" class="slider bs-sl" id="bs-fg-bg-mix" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-fg-bg-mix-val" value="0%" maxlength="4"></div>
+            <div class="bs-sub-label">Per Stroke</div>
+            <div class="bs-row" title="Random hue shift applied once at stroke start, constant for the whole stroke"><span class="bs-label">Hue Jit</span><input type="range" class="slider bs-sl" id="bs-hue-jitter-ps" min="0" max="180" value="0"><input type="text" class="bs-val txt-field" id="bs-hue-jitter-ps-val" value="0°" maxlength="4"></div>
+            <div class="bs-row" title="Same but for saturation/brightness"><span class="bs-label">Sat Jit</span><input type="range" class="slider bs-sl" id="bs-sat-jitter-ps" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-sat-jitter-ps-val" value="0%" maxlength="4"></div>
+            <div class="bs-row" title="Same but for saturation/brightness"><span class="bs-label">Val Jit</span><input type="range" class="slider bs-sl" id="bs-val-jitter-ps" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-val-jitter-ps-val" value="0%" maxlength="4"></div>
+          </div>
+        </details>
+
+        <details class="bs-card">
+          <summary class="bs-card-hd">Tapering</summary>
+          <div class="bs-card-bd">
+            <div class="bs-row" title="Fade-in distance at stroke start (canvas units, 0=off)"><span class="bs-label">Start</span><input type="range" class="slider bs-sl" id="bs-taper-start" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-taper-start-val" value="0%" maxlength="4"></div>
+            <div class="bs-row" title="Fade-out distance at stroke end (canvas units, 0=off)"><span class="bs-label">End</span><input type="range" class="slider bs-sl" id="bs-taper-end" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-taper-end-val" value="0%" maxlength="4"></div>
+            <div class="bs-chk-row" title="Apply taper to size as well as opacity"><span class="bs-chk-lbl">Size Link</span><div class="toggle-switch" id="bs-taper-size" title="Apply taper to size"></div></div>
+            <div class="bs-chk-row" title="Apply taper to opacity (recommended on)"><span class="bs-chk-lbl">Opacity Link</span><div class="toggle-switch on" id="bs-taper-opac" title="Apply taper to opacity"></div></div>
+          </div>
+        </details>
+
+        <details class="bs-card">
+          <summary class="bs-card-hd">Stabilization</summary>
+          <div class="bs-card-bd">
+            <div class="bs-row" title="Pull-string length — higher values add more lag but smoother curves (0=off)"><span class="bs-label">Pull Str</span><input type="range" class="slider bs-sl" id="bs-pull-string" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-pull-string-val" value="0%" maxlength="4"></div>
+            <div class="bs-chk-row" title="String slowly drifts toward pointer even when inside the pull radius"><span class="bs-chk-lbl">Catch Up</span><div class="toggle-switch" id="bs-catch-up" title="String slowly catches up to pointer"></div></div>
+          </div>
+        </details>
+
+        <details class="bs-card">
+          <summary class="bs-card-hd">Bristle</summary>
+          <div class="bs-card-bd">
+            <div class="bs-row" title="Number of bristle fibers. 0=off. 6-24=fan/bristle brush feel"><span class="bs-label">Count</span><input type="range" class="slider bs-sl" id="bs-bristle-count" min="0" max="32" step="1" value="0"><input type="text" class="bs-val txt-field" id="bs-bristle-count-val" value="0" maxlength="3"></div>
+            <div class="bs-row" title="Fiber spread radius as a multiple of brush size (0.1=tight cluster, 2.0=wide fan)"><span class="bs-label">Length</span><input type="range" class="slider bs-sl" id="bs-bristle-length" min="10" max="200" value="80"><input type="text" class="bs-val txt-field" id="bs-bristle-length-val" value="0.8" maxlength="4"></div>
+          </div>
+        </details>
+
+        <details class="bs-card">
+          <summary class="bs-card-hd">Wet Mixing</summary>
+          <div class="bs-card-bd">
+            <div class="bs-row" title="Canvas color pickup strength. Higher=more of the existing paint blends into the brush color"><span class="bs-label">Wetness</span><input type="range" class="slider bs-sl" id="bs-wetness" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-wetness-val" value="0%" maxlength="4"></div>
+            <div class="bs-row" title="How much paint is loaded per stroke. Lower values cause the brush to fade out over long strokes"><span class="bs-label">Pd Load</span><input type="range" class="slider bs-sl" id="bs-paint-load" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-paint-load-val" value="100%" maxlength="4"></div>
+            <div class="bs-row" title="Watercolor edge effect: pigment accumulates at stroke boundaries, darkening the edges"><span class="bs-label">Wet Edge</span><input type="range" class="slider bs-sl" id="bs-wet-edge" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-wet-edge-val" value="0%" maxlength="4"></div>
+            <div class="bs-row" title="How much pressure modulates the wetness amount"><span class="bs-label">Wet Pres</span><input type="range" class="slider bs-sl" id="bs-wet-pressure" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-wet-pressure-val" value="0%" maxlength="4"></div>
+          </div>
+        </details>
+
+        <details class="bs-card">
+          <summary class="bs-card-hd">Texture</summary>
+          <div class="bs-card-bd">
+            <div class="bs-row" title="How strongly the texture modulates brush color (0=no texture, 100=full texture)"><span class="bs-label">Depth</span><input type="range" class="slider bs-sl" id="bs-grain-depth" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-grain-depth-val" value="0%" maxlength="4"></div>
+            <div class="bs-row" title="Texture zoom — lower=zoomed in, higher=tiled"><span class="bs-label">Scale</span><input type="range" class="slider bs-sl" id="bs-grain-scale" min="10" max="400" value="100"><input type="text" class="bs-val txt-field" id="bs-grain-scale-val" value="1.0" maxlength="4"></div>
+            <div class="bs-row" title="Texture rotation angle in degrees"><span class="bs-label">Rotation</span><input type="range" class="slider bs-sl" id="bs-grain-rotation" min="0" max="360" value="0"><input type="text" class="bs-val txt-field" id="bs-grain-rotation-val" value="0°" maxlength="4"></div>
+            <div class="bs-row" title="Texture contrast multiplier (0.5=flat, 2.0=high contrast)"><span class="bs-label">Contrast</span><input type="range" class="slider bs-sl" id="bs-grain-contrast" min="50" max="300" value="100"><input type="text" class="bs-val txt-field" id="bs-grain-contrast-val" value="1.0" maxlength="4"></div>
+            <div class="bs-row" title="Texture brightness offset (negative=darken, positive=lighten)"><span class="bs-label">Bright</span><input type="range" class="slider bs-sl" id="bs-grain-brightness" min="-50" max="50" value="0"><input type="text" class="bs-val txt-field" id="bs-grain-brightness-val" value="0" maxlength="5"></div>
+            <div class="bs-chk-row" title="UV follows canvas coordinates (grain stays fixed while you paint) vs moving with the brush"><span class="bs-chk-lbl">Fixed to Canvas</span><div class="toggle-switch on" id="bs-grain-static" title="Grain UV fixed to canvas (vs moving with brush)"></div></div>
+            <div class="bs-sub-label">Blend</div>
+            <div class="sel-btn-row" id="bs-grain-blend-row">
+              <button class="btn-ghost sel-btn active" id="bs-grain-multiply">×</button>
+              <button class="btn-ghost sel-btn" id="bs-grain-screen">⊕</button>
+              <button class="btn-ghost sel-btn" id="bs-grain-overlay">◑</button>
+              <button class="btn-ghost sel-btn" id="bs-grain-normal">■</button>
+            </div>
+            <div class="bs-sub-label">Texture Library</div>
+            <div id="bs-grain-library" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:6px"></div>
+            <div class="bs-sub-label">Custom Texture</div>
+            <div class="bs-chk-row"><span class="bs-chk-lbl" id="bs-grain-tex-name" style="font-size:9px;color:var(--text-3)">Procedural noise</span><button class="btn-ghost" id="bs-grain-tex-load-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px">Load</button></div>
+            <div class="bs-chk-row" id="bs-grain-tex-clear-row" style="display:none"><button class="btn-ghost" id="bs-grain-tex-clear-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px;width:100%">Clear texture</button></div>
+          </div>
+        </details>
+
+      </div>
+
+      <!-- Pressure Curve -->
+      <div class="bs-card">
+        <div class="bs-card-hd bs-card-hd-static">Pressure Curve</div>
+        <div class="bs-card-bd"><div id="pressureCurveContainer"></div></div>
+      </div>
+
     </div>
-    <div>
-      <div class="bs-section-label">Pressure Curve</div>
-      <div class="pressure-curve-placeholder">
-        <svg width="160" height="48" viewBox="0 0 160 48" fill="none"><line x1="0" y1="48" x2="160" y2="0" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><circle cx="40" cy="36" r="4" fill="rgba(255,255,255,0.8)"/><circle cx="120" cy="12" r="4" fill="rgba(255,255,255,0.8)"/></svg>
+
+    <!-- ── Selection tool settings ── -->
+    <div id="bs-selection-section" style="display:none">
+      <div class="bs-section-label">Mode</div>
+      <div class="sel-btn-row">
+        <button class="btn-ghost sel-btn active" id="bs-selModeReplace">Replace</button>
+        <button class="btn-ghost sel-btn" id="bs-selModeAdd">+ Add</button>
+        <button class="btn-ghost sel-btn" id="bs-selModeSub">− Sub</button>
+        <button class="btn-ghost sel-btn" id="bs-selModeInt">∩</button>
       </div>
     </div>
   </div>
@@ -477,14 +729,15 @@
       <div class="shortcut-list">
         <div class="shortcut-row"><span class="shortcut-name">Brush</span><kbd class="shortcut-key">B</kbd></div>
         <div class="shortcut-row"><span class="shortcut-name">Eraser</span><kbd class="shortcut-key">E</kbd></div>
-        <div class="shortcut-row"><span class="shortcut-name">Eyedropper</span><kbd class="shortcut-key">I</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Smudge</span><kbd class="shortcut-key">M</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Selection</span><kbd class="shortcut-key">R</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Eyedropper</span><kbd class="shortcut-key">I / Alt</kbd></div>
         <div class="shortcut-row"><span class="shortcut-name">Undo</span><kbd class="shortcut-key">⌘Z</kbd></div>
         <div class="shortcut-row"><span class="shortcut-name">Redo</span><kbd class="shortcut-key">⇧⌘Z</kbd></div>
         <div class="shortcut-row"><span class="shortcut-name">Focus Mode</span><kbd class="shortcut-key">Tab</kbd></div>
         <div class="shortcut-row"><span class="shortcut-name">Quick Search</span><kbd class="shortcut-key">⌘K</kbd></div>
-        <div class="shortcut-row"><span class="shortcut-name">Rotate CW</span><kbd class="shortcut-key">R</kbd></div>
-        <div class="shortcut-row"><span class="shortcut-name">Brush Size −</span><kbd class="shortcut-key">[</kbd></div>
-        <div class="shortcut-row"><span class="shortcut-name">Brush Size +</span><kbd class="shortcut-key">]</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Brush Size −</span><kbd class="shortcut-key">Q</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Brush Size +</span><kbd class="shortcut-key">W</kbd></div>
       </div>
     </div>
   </div>
