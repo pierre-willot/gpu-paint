@@ -10,8 +10,8 @@
   --border:rgba(255,255,255,0.1);
   --border-hi:rgba(255,255,255,0.18);
   --text-1:#f4f7fd;
-  --text-2:#bcc8da;
-  --text-3:#7e8fa2;
+  --text-2:#d4dff0;
+  --text-3:#9aacbf;
   --track-h:22px;
   --thumb-d:18px;
   --header-h:52px;
@@ -262,11 +262,11 @@ header{
 
 /* ── Brush settings panel ───────────────────────────────────────────────────── */
 .brush-settings-panel{width:283px;min-width:238px;max-width:450px;min-height:200px;top:var(--panel-top)}
+.bs-panel-header{display:flex;align-items:center;justify-content:space-between;padding:10px 10px 6px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,0.07)}
+#bs-stroke-preview{display:block;width:calc(100% - 12px);height:36px;border-radius:7px;margin:6px 6px 0;flex-shrink:0;cursor:default}
 .bs-body{flex:1;min-height:0;padding:8px 6px 8px;display:flex;flex-direction:column;gap:3px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent;touch-action:none}
 .bs-body::-webkit-scrollbar{width:3px}
 .bs-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px}
-.bs-panel-header{display:flex;align-items:center;justify-content:space-between;padding:0 2px 6px;border-bottom:none;margin-bottom:0;flex-shrink:0}
-#bs-stroke-preview{display:block;width:100%;height:36px;border-radius:7px;margin-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.07);flex-shrink:0;cursor:default}
 .bs-tool-title{font-size:10px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:0.07em}
 .bs-close-btn{width:18px;height:18px;font-size:13px;border-radius:5px;padding:0;line-height:1;flex-shrink:0}
 .bs-top-rows{padding:2px 2px 4px}

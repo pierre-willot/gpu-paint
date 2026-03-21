@@ -434,12 +434,12 @@
 <!-- ═══ TOOL SETTINGS PANEL ═══ -->
 <div class="float-panel brush-settings-panel" id="brushSettingsPanel" style="display:flex;left:320px;height:340px;">
   <div class="panel-pill"></div>
+  <div class="bs-panel-header">
+    <div class="bs-tool-title" id="bs-tool-title">Brush</div>
+    <button class="btn-ghost bs-close-btn" id="bsCloseBtn" title="Close">✕</button>
+  </div>
+  <canvas id="bs-stroke-preview" width="216" height="36" title="Live stroke preview — updates as you change settings"></canvas>
   <div class="bs-body">
-    <div class="bs-panel-header">
-      <div class="bs-tool-title" id="bs-tool-title">Brush</div>
-      <button class="btn-ghost bs-close-btn" id="bsCloseBtn" title="Close">✕</button>
-    </div>
-    <canvas id="bs-stroke-preview" width="216" height="36" title="Live stroke preview — updates as you change settings"></canvas>
 
     <!-- ── Painting tools (brush / eraser / smudge) ── -->
     <div id="bs-painting-section">
@@ -597,10 +597,10 @@
       </div>
 
       <!-- Pressure Curve -->
-      <div class="bs-card">
-        <div class="bs-card-hd bs-card-hd-static">Pressure Curve</div>
+      <details class="bs-card" open>
+        <summary class="bs-card-hd">Pressure Curve</summary>
         <div class="bs-card-bd"><div id="pressureCurveContainer"></div></div>
-      </div>
+      </details>
 
     </div>
 

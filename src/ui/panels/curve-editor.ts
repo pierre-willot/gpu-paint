@@ -166,7 +166,7 @@ export class CurveEditor {
         const toY = (ny: number) => (h - pad) - ny * (h - pad*2);
 
         if (this.spec.mode === 'linear') {
-            ctx.strokeStyle = off ? 'rgba(180,210,255,0.25)' : 'rgba(180,210,255,0.9)';
+            ctx.strokeStyle = off ? 'rgba(180,210,255,0.55)' : 'rgba(180,210,255,0.9)';
             ctx.lineWidth   = 1.5;
             ctx.beginPath();
             ctx.moveTo(toX(0), toY(0)); ctx.lineTo(toX(1), toY(1));
@@ -179,7 +179,7 @@ export class CurveEditor {
             const p2y = this.spec.p2y ?? DEFAULT_P2Y;
 
             // Control point lines
-            ctx.strokeStyle = off ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.2)';
+            ctx.strokeStyle = off ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.2)';
             ctx.lineWidth   = 1;
             ctx.setLineDash([2, 2]);
             ctx.beginPath(); ctx.moveTo(toX(0), toY(0)); ctx.lineTo(toX(p1x), toY(p1y)); ctx.stroke();
@@ -187,7 +187,7 @@ export class CurveEditor {
             ctx.setLineDash([]);
 
             // Curve
-            ctx.strokeStyle = off ? 'rgba(180,210,255,0.22)' : 'rgba(180,210,255,0.95)';
+            ctx.strokeStyle = off ? 'rgba(180,210,255,0.55)' : 'rgba(180,210,255,0.95)';
             ctx.lineWidth   = 1.5;
             ctx.beginPath();
             ctx.moveTo(toX(0), toY(0));
@@ -212,7 +212,7 @@ export class CurveEditor {
 
         // "off" overlay text
         if (off) {
-            ctx.fillStyle = 'rgba(255,255,255,0.18)';
+            ctx.fillStyle = 'rgba(255,255,255,0.35)';
             ctx.font      = `${Math.round(h * 0.18)}px DM Sans, sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
