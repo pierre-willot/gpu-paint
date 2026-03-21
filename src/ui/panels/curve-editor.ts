@@ -159,64 +159,65 @@ export class CurveEditor {
         ctx.strokeStyle = 'rgba(255,255,255,0.1)';
         ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(w - pad, pad); ctx.stroke();
 
-        if (this.spec.mode === 'off') {
-            // Off: draw flat line at top (output = 1.0 always)
-            ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(pad, pad); ctx.lineTo(w - pad, pad);
-            ctx.stroke();
-            return;
-        }
+        const off = this.spec.mode === 'off';
 
         // Convert normalized 0..1 coords to pixel coords
         const toX = (nx: number) => pad + nx * (w - pad*2);
         const toY = (ny: number) => (h - pad) - ny * (h - pad*2);
 
         if (this.spec.mode === 'linear') {
-            // Linear: straight line from bottom-left to top-right
-            ctx.strokeStyle = 'rgba(180,210,255,0.9)';
+            ctx.strokeStyle = off ? 'rgba(180,210,255,0.25)' : 'rgba(180,210,255,0.9)';
             ctx.lineWidth   = 1.5;
             ctx.beginPath();
             ctx.moveTo(toX(0), toY(0)); ctx.lineTo(toX(1), toY(1));
             ctx.stroke();
-            return;
+        } else {
+            // Bezier (or off — show dimmed bezier so the shape is always visible)
+            const p1x = this.spec.p1x ?? DEFAULT_P1X;
+            const p1y = this.spec.p1y ?? DEFAULT_P1Y;
+            const p2x = this.spec.p2x ?? DEFAULT_P2X;
+            const p2y = this.spec.p2y ?? DEFAULT_P2Y;
+
+            // Control point lines
+            ctx.strokeStyle = off ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.2)';
+            ctx.lineWidth   = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath(); ctx.moveTo(toX(0), toY(0)); ctx.lineTo(toX(p1x), toY(p1y)); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(toX(1), toY(1)); ctx.lineTo(toX(p2x), toY(p2y)); ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Curve
+            ctx.strokeStyle = off ? 'rgba(180,210,255,0.22)' : 'rgba(180,210,255,0.95)';
+            ctx.lineWidth   = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(toX(0), toY(0));
+            ctx.bezierCurveTo(toX(p1x), toY(p1y), toX(p2x), toY(p2y), toX(1), toY(1));
+            ctx.stroke();
+
+            // Control point handles (only when active)
+            if (!off) {
+                const drawHandle = (nx: number, ny: number, hovered: boolean) => {
+                    ctx.beginPath();
+                    ctx.arc(toX(nx), toY(ny), hovered ? 5 : 4, 0, Math.PI * 2);
+                    ctx.fillStyle   = hovered ? 'rgba(120,180,255,1)' : 'rgba(180,210,255,0.9)';
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                    ctx.lineWidth   = 1;
+                    ctx.stroke();
+                };
+                drawHandle(p1x, p1y, this.dragging === 1);
+                drawHandle(p2x, p2y, this.dragging === 2);
+            }
         }
 
-        // Bezier: draw cubic curve with control points
-        const p1x = this.spec.p1x ?? DEFAULT_P1X;
-        const p1y = this.spec.p1y ?? DEFAULT_P1Y;
-        const p2x = this.spec.p2x ?? DEFAULT_P2X;
-        const p2y = this.spec.p2y ?? DEFAULT_P2Y;
-
-        // Draw control point lines
-        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-        ctx.lineWidth   = 1;
-        ctx.setLineDash([2, 2]);
-        ctx.beginPath(); ctx.moveTo(toX(0), toY(0)); ctx.lineTo(toX(p1x), toY(p1y)); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(toX(1), toY(1)); ctx.lineTo(toX(p2x), toY(p2y)); ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Draw curve
-        ctx.strokeStyle = 'rgba(180,210,255,0.95)';
-        ctx.lineWidth   = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(toX(0), toY(0));
-        ctx.bezierCurveTo(toX(p1x), toY(p1y), toX(p2x), toY(p2y), toX(1), toY(1));
-        ctx.stroke();
-
-        // Draw control points
-        const drawHandle = (nx: number, ny: number, hovered: boolean) => {
-            ctx.beginPath();
-            ctx.arc(toX(nx), toY(ny), hovered ? 5 : 4, 0, Math.PI * 2);
-            ctx.fillStyle   = hovered ? 'rgba(120,180,255,1)' : 'rgba(180,210,255,0.9)';
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-            ctx.lineWidth   = 1;
-            ctx.stroke();
-        };
-        drawHandle(p1x, p1y, this.dragging === 1);
-        drawHandle(p2x, p2y, this.dragging === 2);
+        // "off" overlay text
+        if (off) {
+            ctx.fillStyle = 'rgba(255,255,255,0.18)';
+            ctx.font      = `${Math.round(h * 0.18)}px DM Sans, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('click to enable', w / 2, h / 2);
+        }
     }
 
     // ── Interaction ───────────────────────────────────────────────────────────
