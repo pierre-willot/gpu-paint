@@ -1,18 +1,19 @@
-import { PaintPipeline }                          from '../renderer/pipeline';
+import { PaintPipeline, TransformState }           from '../renderer/pipeline';
 import { HistoryManager }                          from './history-manager';
 import { NavigationManager }                       from '../input/navigation';
 import { setupPointer }                            from '../input/pointer';
 import { Tool }                                    from './tool';
-import { BaseTool }                                from './tools/base-tool';
 import { BrushTool }                               from './tools/brush-tool';
 import { EraserTool }                              from './tools/eraser-tool';
 import { EyedropperTool }                          from './tools/eyedropper-tool';
 import { FillTool }                                from './tools/fill-tool';
 import { SelectionTool }                           from './tools/selection-tool';
+import { SmudgeTool }                              from './tools/smudge-tool';
+import { TransformTool }                           from './tools/transform-tool';
+import { TransformOverlay }                        from '../ui/overlays/transform-overlay';
 import { EventBus }                                from './event-bus';
 import { AutosaveManager, recordToCommand, recordToCheckpoint } from './autosave-manager';
 import { PressureCurve, PRESSURE_PRESETS }         from '../renderer/pressure-curve';
-import { FLOATS_PER_STAMP }                        from '../renderer/pipeline-cache';
 import { BrushCursor }                             from '../ui/overlays/brush-cursor';
 import { generateBackground, CanvasSizeOptions }   from '../ui/panels/canvas-size-dialog';
 
@@ -33,6 +34,7 @@ export class PaintApp {
     private _activeTool:    Tool;
     public  brushTool:      BrushTool;
     public  eraserTool:     EraserTool;
+    public  smudgeTool:     SmudgeTool;
     public  eyedropperTool: EyedropperTool;
     public  fillTool:       FillTool;
     public  selectionTool:  SelectionTool;
@@ -40,16 +42,24 @@ export class PaintApp {
     private brushCursor:    BrushCursor | null = null;
     private clipboard:      { pixels: Uint8Array } | null = null;
 
+    public  transformTool:    TransformTool;
+    private transformOverlay: TransformOverlay;
+    private _transformBeforePixels: Uint8Array | null = null;
+
     private lastFrameTime   = 0;
     private lastFrameDelta  = 16.6;
     private idleFrameCount  = 0;
     private readonly budgetMs: number;
 
     private pointerMoveQueue: QueuedMove[] = [];
-    private isPointerDown     = false;
+    private isPointerDown              = false;
     private activePointerId:  number | null = null;
+    private _hadSelectionAtPointerDown = false;
+    private _strokeBeforePixelsPromise: Promise<Uint8Array> | null = null;
+    private _selectionBeforeMask: { data: Uint8Array; hasMask: boolean } | null = null;
 
     private pressureCurve:  PressureCurve;
+    private _pickupTexture: GPUTexture | null = null;
     private renderErrorCount  = 0;
     private renderLoopStopped = false;
     private readonly MAX_RENDER_ERRORS = 3;
@@ -72,6 +82,8 @@ export class PaintApp {
         this.history = new HistoryManager(
             async cmd  => { this.pipeline.applyCommand(cmd); this.pipeline.markDirty(); this.emitStateChange(); },
             async log  => { await this.pipeline.reconstructFromHistory(log); this.pipeline.markDirty(); this.emitStateChange(); },
+            async cmd  => { await this.pipeline.directUndoCommand(cmd); this.emitStateChange(); },
+            async cmd  => { await this.pipeline.directRedoCommand(cmd); this.emitStateChange(); },
             {
                 onCheckpointNeeded:     len => this.pipeline.createCheckpointIfNeeded(len),
                 onOldestCommandDropped: ()  => { this.pipeline.handleCommandDropped();      this.autosave?.onCommandDropped();  },
@@ -84,6 +96,7 @@ export class PaintApp {
 
         this.brushTool      = new BrushTool();
         this.eraserTool     = new EraserTool();
+        this.smudgeTool     = new SmudgeTool();
         this.eyedropperTool = new EyedropperTool(this.pipeline, this.bus);
         this.fillTool       = new FillTool();
         this.selectionTool  = new SelectionTool(canvas);
@@ -91,9 +104,45 @@ export class PaintApp {
         this.selectionTool.screenToCanvas = (cx, cy) => this.translatePoint(cx, cy);
         this.selectionTool.canvasToScreen = (nx, ny)  => this.canvasToScreen(nx, ny);
 
-        this.wireTool(this.brushTool);
-        this.wireTool(this.eraserTool);
+        // Wire selection → history so undo/redo works for selections
+        this.selectionTool.onSelectionMade = (op) => {
+            const isDeselect = op.operation === 'rect' && (op.w ?? 1) < 0.001;
+            if (isDeselect && !this._hadSelectionAtPointerDown) {
+                // Tapping on an empty canvas — nothing changed, skip pushing to history.
+                return;
+            }
+            const beforeMask = this._selectionBeforeMask;
+            this._selectionBeforeMask = null;
+            const afterSnapshot = this.pipeline.selectionManager.getMaskSnapshot();
+            this.history.execute({
+                type:       'selection',
+                label:      'Selection',
+                operation:  isDeselect ? 'deselect' : op.operation,
+                beforeMask: beforeMask?.hasMask ? beforeMask.data : null,
+                afterMask:  afterSnapshot.hasMask ? afterSnapshot.data : null,
+                maskWidth:  this.pipeline.canvasWidth,
+                maskHeight: this.pipeline.canvasHeight,
+                timestamp:  this.history.now(),
+            });
+        };
+
         this._activeTool = this.brushTool;
+
+        // ── Transform tool & overlay ───────────────────────────────────────────
+        this.transformTool    = new TransformTool();
+        this.transformOverlay = new TransformOverlay(
+            this.transformTool,
+            () => this.commitTransform(),
+            () => this.cancelTransform()
+        );
+        this.transformOverlay.canvasToScreen = (nx, ny) => this.canvasToScreen(nx, ny);
+        this.transformOverlay.screenToCanvas = (cx, cy) => this.translatePoint(cx, cy);
+
+        // Redraw overlay whenever the transform state changes (GPU update + handles).
+        this.transformTool.onTransformChange = (state) => {
+            this.pipeline.updateTransform(state);
+            this.transformOverlay.draw();
+        };
 
         this.pushPressureLUT();
         this.setupInputs();
@@ -101,6 +150,7 @@ export class PaintApp {
 
     // Expose active tool name for bus sync
     public get activeToolName(): string { return this._activeTool.constructor.name; }
+    public get activeTool():     Tool   { return this._activeTool; }
 
     // ── Brush cursor ──────────────────────────────────────────────────────────
 
@@ -206,7 +256,7 @@ export class PaintApp {
         this._activeTool = tool;
         this.bus.emit('tool:change', { tool: tool.constructor.name });
 
-        const isBrushLike = tool === this.brushTool || tool === this.eraserTool;
+        const isBrushLike = tool === this.brushTool || tool === this.eraserTool || tool === this.smudgeTool;
         this.brushCursor?.setVisible(isBrushLike);
         this.canvas.style.cursor =
             isBrushLike                  ? 'none'
@@ -216,28 +266,19 @@ export class PaintApp {
           : 'default';
     }
 
-    private wireTool(tool: BaseTool): void {
-        tool.onPartialFlush = (stamps, layerIndex, blendMode) => {
-            this.history.execute({
-                type: 'stroke', label: 'Brush Stroke',
-                layerIndex, stamps, blendMode,
-                floatsPerStamp: FLOATS_PER_STAMP,
-                timestamp: this.history.now()
-            });
-        };
-    }
-
     // ── Pressure ──────────────────────────────────────────────────────────────
 
     public setPressureCurve(lut: Float32Array): void {
         this.brushTool.setPressureLUT(lut.slice());
         this.eraserTool.setPressureLUT(lut.slice());
+        this.smudgeTool.setPressureLUT(lut.slice());
     }
 
     private pushPressureLUT(): void {
         const lut = this.pressureCurve.toLUT();
         this.brushTool.setPressureLUT(lut.slice());
         this.eraserTool.setPressureLUT(lut.slice());
+        this.smudgeTool.setPressureLUT(lut.slice());
     }
 
     // ── Events ────────────────────────────────────────────────────────────────
@@ -321,6 +362,46 @@ export class PaintApp {
                 this.activePointerId = e.pointerId;
                 this.idleFrameCount  = 0;
                 this.pointerMoveQueue = [];
+                this._hadSelectionAtPointerDown = this.pipeline.selectionManager.hasMask;
+                // Capture layer state before any painting begins (for pixel-based undo)
+                const isPaintingTool = this._activeTool === this.brushTool ||
+                                       this._activeTool === this.eraserTool ||
+                                       this._activeTool === this.smudgeTool;
+                if (isPaintingTool) {
+                    const layer = this.pipeline.layerManager.getActiveLayer();
+                    if (layer) {
+                        this._strokeBeforePixelsPromise =
+                            this.pipeline.effectsPipeline.snapshotTexture(layer.texture);
+                        // Wet mixing: GPU-to-GPU copy of layer at stroke start.
+                        // Must be synchronous so the pickup texture is ready before the
+                        // first stamp is drawn. Do NOT use the async snapshotTexture path.
+                        if (this._activeTool === this.brushTool) {
+                            const wetness = this.brushTool.getDescriptor().wetness;
+                            if (wetness > 0) {
+                                this._pickupTexture?.destroy();
+                                this._pickupTexture = this.pipeline.device.createTexture({
+                                    size:   [layer.texture.width, layer.texture.height],
+                                    format: layer.texture.format,
+                                    usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+                                });
+                                const enc = this.pipeline.device.createCommandEncoder();
+                                enc.copyTextureToTexture(
+                                    { texture: layer.texture },
+                                    { texture: this._pickupTexture },
+                                    [layer.texture.width, layer.texture.height]
+                                );
+                                this.pipeline.device.queue.submit([enc.finish()]);
+                                this.pipeline.brushRenderer.setPickupTexture(this._pickupTexture, wetness);
+                            } else {
+                                this.pipeline.brushRenderer.setPickupTexture(null, 0);
+                            }
+                        }
+                    }
+                    this.pipeline.resetPaintingFlag();
+                }
+                if (this._activeTool === this.selectionTool) {
+                    this._selectionBeforeMask = this.pipeline.selectionManager.getMaskSnapshot();
+                }
                 const c = this.translatePoint(e.clientX, e.clientY);
                 const tiltX = Number.isFinite(e.tiltX) ? e.tiltX : 0;
                 const tiltY = Number.isFinite(e.tiltY) ? e.tiltY : 0;
@@ -334,7 +415,7 @@ export class PaintApp {
                     const c = this.translatePoint(ev.clientX, ev.clientY);
                     const tiltX = Number.isFinite(ev.tiltX) ? ev.tiltX : 0;
                     const tiltY = Number.isFinite(ev.tiltY) ? ev.tiltY : 0;
-                    this.pointerMoveQueue.push({ x: c.x, y: c.y, pressure: ev.pressure || p, tiltX, tiltY });
+                    this.pointerMoveQueue.push({ x: c.x, y: c.y, pressure: e.pointerType === 'mouse' ? 1.0 : (ev.pressure || p), tiltX, tiltY });
                 }
             },
             async (x, y, p, e) => {
@@ -349,17 +430,47 @@ export class PaintApp {
                 }
 
                 const c      = this.translatePoint(e.clientX, e.clientY);
-                const stamps = await this._activeTool.onPointerUp(c.x, c.y, p, this.pipeline);
+                await this._activeTool.onPointerUp(c.x, c.y, p, this.pipeline);
 
-                if (stamps && stamps.length > 0) {
-                    await this.history.execute({
-                        type: 'stroke', label: 'Brush Stroke',
-                        layerIndex:     this.pipeline.activeLayerIndex,
-                        stamps,
-                        blendMode:      this._activeTool.blendMode,
-                        floatsPerStamp: FLOATS_PER_STAMP,
-                        timestamp:      this.history.now()
-                    });
+                if (this._activeTool === this.smudgeTool) {
+                    const layer = this.pipeline.layerManager.getActiveLayer();
+                    if (layer && this._strokeBeforePixelsPromise && this.pipeline.hadPaintingSinceReset) {
+                        const [beforePixels, afterPixels] = await Promise.all([
+                            this._strokeBeforePixelsPromise,
+                            this.pipeline.effectsPipeline.snapshotTexture(layer.texture),
+                        ]);
+                        this._strokeBeforePixelsPromise = null;
+                        await this.history.execute({
+                            type:         'smudge',
+                            label:        'Smudge Stroke',
+                            layerIndex:   this.pipeline.activeLayerIndex,
+                            beforePixels,
+                            afterPixels,
+                            timestamp:    this.history.now(),
+                        });
+                    }
+                } else if (this.pipeline.hadPaintingSinceReset && this._strokeBeforePixelsPromise) {
+                    // Pixel-based stroke: capture before+after and push to history.
+                    const layer = this.pipeline.layerManager.getActiveLayer();
+                    if (layer) {
+                        const [beforePixels, afterPixels] = await Promise.all([
+                            this._strokeBeforePixelsPromise,
+                            this.pipeline.effectsPipeline.snapshotTexture(layer.texture),
+                        ]);
+                        this._strokeBeforePixelsPromise = null;
+                        await this.history.execute({
+                            type:         'stroke',
+                            label:        'Brush Stroke',
+                            layerIndex:   this.pipeline.activeLayerIndex,
+                            beforePixels,
+                            afterPixels,
+                            timestamp:    this.history.now(),
+                        });
+                    }
+                    // Clear wet mixing pickup texture after stroke
+                    this.pipeline.brushRenderer.setPickupTexture(null, 0);
+                    this._pickupTexture?.destroy();
+                    this._pickupTexture = null;
                 }
             }
         );
@@ -391,6 +502,7 @@ export class PaintApp {
 
     public setBrushSize(size: number): void {
         this.brushTool.setSize(size);
+        this.smudgeTool.setSize(size);
         this.pipeline.updateUniforms(this.canvas.width, this.canvas.height, size);
         this.brushCursor?.setSize(size);
         this.bus.emit('brush:change', { size, color: Array.from(this.brushTool.getCurrentColor()) });
@@ -410,30 +522,77 @@ export class PaintApp {
 
     public clearLayer(): void { this._activeTool.reset(this.pipeline); this.pipeline.clear(); }
 
+    /** Delete key: clears selected pixels (or full layer if no selection). Undoable. */
+    public async clearPixels(): Promise<void> {
+        const layer = this.pipeline.layerManager.getActiveLayer();
+        if (!layer) return;
+        const beforePixels = await this.pipeline.effectsPipeline.snapshotTexture(layer.texture);
+        const afterPixels = beforePixels.slice();
+        if (this.pipeline.selectionManager.hasMask) {
+            const mask = this.pipeline.selectionManager.getMaskData();
+            for (let i = 0; i < mask.length; i++) {
+                if (mask[i] > 0) {
+                    afterPixels[i * 4]     = 0;
+                    afterPixels[i * 4 + 1] = 0;
+                    afterPixels[i * 4 + 2] = 0;
+                    afterPixels[i * 4 + 3] = 0;
+                }
+            }
+        } else {
+            afterPixels.fill(0);
+        }
+        this.pipeline.effectsPipeline.restoreTexture(layer.texture, afterPixels);
+        this.pipeline.markDirty();
+        await this.history.execute({
+            type:         'cut',
+            label:        'Cut',
+            layerIndex:   this.pipeline.activeLayerIndex,
+            beforePixels,
+            afterPixels,
+            timestamp:    this.history.now(),
+        });
+        this.emitStateChange();
+    }
+
     public selectAll(): void {
-        this.pipeline.selectAll();   // pre-apply — applyCommand skips selection commands
+        const before = this.pipeline.selectionManager.getMaskSnapshot();
+        this.pipeline.selectAll();
+        const after = this.pipeline.selectionManager.getMaskSnapshot();
         this.history.execute({
-            type: 'selection', label: 'Selection',
-            operation: 'selectAll', selMode: 'replace',
-            timestamp: this.history.now()
+            type: 'selection', label: 'Selection', operation: 'selectAll',
+            beforeMask: before.hasMask ? before.data : null,
+            afterMask:  after.hasMask  ? after.data  : null,
+            maskWidth:  this.pipeline.canvasWidth,
+            maskHeight: this.pipeline.canvasHeight,
+            timestamp:  this.history.now(),
         });
     }
 
     public deselect(): void {
+        if (!this.pipeline.selectionManager.hasMask) return;
+        const before = this.pipeline.selectionManager.getMaskSnapshot();
         this.pipeline.deselect();
         this.history.execute({
-            type: 'selection', label: 'Selection',
-            operation: 'deselect', selMode: 'replace',
-            timestamp: this.history.now()
+            type: 'selection', label: 'Selection', operation: 'deselect',
+            beforeMask: before.hasMask ? before.data : null,
+            afterMask:  null,
+            maskWidth:  this.pipeline.canvasWidth,
+            maskHeight: this.pipeline.canvasHeight,
+            timestamp:  this.history.now(),
         });
     }
 
     public invertSelection(): void {
+        const before = this.pipeline.selectionManager.getMaskSnapshot();
         this.pipeline.invertSelection();
+        const after = this.pipeline.selectionManager.getMaskSnapshot();
         this.history.execute({
-            type: 'selection', label: 'Selection',
-            operation: 'invertSelection', selMode: 'replace',
-            timestamp: this.history.now()
+            type: 'selection', label: 'Selection', operation: 'invertSelection',
+            beforeMask: before.hasMask ? before.data : null,
+            afterMask:  after.hasMask  ? after.data  : null,
+            maskWidth:  this.pipeline.canvasWidth,
+            maskHeight: this.pipeline.canvasHeight,
+            timestamp:  this.history.now(),
         });
     }
 
@@ -461,6 +620,8 @@ export class PaintApp {
         const layer = this.pipeline.layerManager.getActiveLayer();
         if (!layer) return;
         const pixels = await this.pipeline.effectsPipeline.snapshotTexture(layer.texture);
+        // Keep a clean copy of the before-state for undo
+        const beforePixels = pixels.slice();
         // Build the post-cut pixel state (clear selected or all pixels)
         const afterCut = pixels.slice();
         if (this.pipeline.selectionManager.hasMask) {
@@ -489,10 +650,12 @@ export class PaintApp {
         this.pipeline.effectsPipeline.restoreTexture(layer.texture, afterCut);
         this.pipeline.markDirty();
         await this.history.execute({
-            type: 'cut', label: 'Cut',
-            layerIndex: this.pipeline.activeLayerIndex,
-            pixels:     afterCut,
-            timestamp:  this.history.now(),
+            type:         'cut',
+            label:        'Cut',
+            layerIndex:   this.pipeline.activeLayerIndex,
+            beforePixels,
+            afterPixels:  afterCut,
+            timestamp:    this.history.now(),
         });
         this.emitStateChange();
     }
@@ -505,6 +668,194 @@ export class PaintApp {
             timestamp: this.history.now(),
         });
         this.emitStateChange();
+    }
+
+    // ── Transform (C4) ───────────────────────────────────────────────────────
+
+    /**
+     * Enter free-transform mode on the active layer.
+     *
+     * When a pixel selection is active and no explicit `sourcePixels` or
+     * `initialState` are provided, automatically extracts only the selected
+     * pixels, punches a hole in the layer, and positions the bounding box
+     * as the initial transform state.
+     *
+     * @param sourcePixels  Pre-computed source pixels (for image import / history replay).
+     * @param initialState  Override the starting transform state.
+     */
+    public async enterTransform(
+        sourcePixels?: Uint8Array,
+        initialState?: TransformState
+    ): Promise<void> {
+        if (this.pipeline.transformActive) return; // already in transform mode
+        const layer = this.pipeline.layerManager.getActiveLayer();
+        if (!layer) return;
+
+        // Canvas aspect ratio for pixel-correct rotation in TransformTool.
+        this.transformTool.canvasAspect = this.pipeline.canvasWidth / this.pipeline.canvasHeight;
+
+        if (sourcePixels && initialState) {
+            // ── Caller-supplied pixels + state (image import, history replay) ──
+            this._transformBeforePixels = sourcePixels.slice();
+            this.transformTool.state = initialState;
+            this.pipeline.beginTransform(sourcePixels, initialState);
+
+        } else {
+            // ── Content-bounded transform (with or without selection) ──────────
+            // Computes a bounding box of the content (selected pixels, or all
+            // non-transparent pixels when no selection) and remaps the source
+            // texture so that UV (0..1) covers exactly the bounding box region.
+            // This ensures the content appears at natural 1:1 scale initially.
+            const fullPixels = await this.pipeline.effectsPipeline.snapshotTexture(layer.texture);
+            this._transformBeforePixels = fullPixels.slice();
+
+            const hasSel = this.pipeline.selectionManager.hasMask;
+            const mask   = hasSel ? this.pipeline.selectionManager.getMaskData() : null;
+            const W      = this.pipeline.canvasWidth;
+            const H      = this.pipeline.canvasHeight;
+
+            // Find bounding box of content.
+            let minX = W, minY = H, maxX = -1, maxY = -1;
+            for (let py = 0; py < H; py++) {
+                for (let px = 0; px < W; px++) {
+                    const i      = py * W + px;
+                    const inside = mask ? mask[i] > 0 : fullPixels[i * 4 + 3] > 4;
+                    if (inside) {
+                        if (px < minX) minX = px;
+                        if (px > maxX) maxX = px;
+                        if (py < minY) minY = py;
+                        if (py > maxY) maxY = py;
+                    }
+                }
+            }
+            if (maxX < 0) { minX = 0; maxX = W - 1; minY = 0; maxY = H - 1; }
+
+            const bboxW = maxX - minX + 1, bboxH = maxY - minY + 1;
+            const state: TransformState = {
+                cx:     (minX + maxX + 1) / 2 / W,
+                cy:     (minY + maxY + 1) / 2 / H,
+                scaleX: bboxW / W,
+                scaleY: bboxH / H,
+                rotation: 0,
+            };
+
+            // Precompute per-column and per-row canvas index mappings.
+            const mapX = new Int32Array(W);
+            const mapY = new Int32Array(H);
+            for (let sx = 0; sx < W; sx++)
+                mapX[sx] = Math.min(W - 1, Math.round(minX + (sx / (W - 1)) * (bboxW - 1)));
+            for (let sy = 0; sy < H; sy++)
+                mapY[sy] = Math.min(H - 1, Math.round(minY + (sy / (H - 1)) * (bboxH - 1)));
+
+            // Build source pixels: bbox content remapped to fill UV (0..1).
+            const srcPixels  = new Uint8Array(W * H * 4);
+            const holePixels = mask ? new Uint8Array(W * H * 4) : undefined;
+
+            if (mask) {
+                // Hole = unselected pixels stay in the background.
+                for (let i = 0; i < W * H; i++) {
+                    const i4 = i * 4;
+                    const mf = mask[i] / 255;
+                    holePixels![i4]     = fullPixels[i4];
+                    holePixels![i4 + 1] = fullPixels[i4 + 1];
+                    holePixels![i4 + 2] = fullPixels[i4 + 2];
+                    holePixels![i4 + 3] = Math.round(fullPixels[i4 + 3] * (1 - mf));
+                }
+            }
+
+            for (let sy = 0; sy < H; sy++) {
+                const cpy    = mapY[sy];
+                const srcRow = cpy * W;
+                const dstRow = sy  * W;
+                for (let sx = 0; sx < W; sx++) {
+                    const cpx = mapX[sx];
+                    const ci4 = (srcRow + cpx) * 4;
+                    const si4 = (dstRow + sx)  * 4;
+                    srcPixels[si4]     = fullPixels[ci4];
+                    srcPixels[si4 + 1] = fullPixels[ci4 + 1];
+                    srcPixels[si4 + 2] = fullPixels[ci4 + 2];
+                    srcPixels[si4 + 3] = mask
+                        ? Math.round(fullPixels[ci4 + 3] * mask[srcRow + cpx] / 255)
+                        : fullPixels[ci4 + 3];
+                }
+            }
+
+            this.transformTool.state = state;
+            this.pipeline.beginTransform(srcPixels, state, holePixels);
+        }
+
+        this.transformOverlay.show();
+        this.bus.emit('transform:change', { active: true });
+    }
+
+    public async commitTransform(): Promise<void> {
+        if (!this.pipeline.transformActive) return;
+        const layerIndex   = this.pipeline.activeLayerIndex;
+        const beforePixels = this._transformBeforePixels!;
+        const afterPixels  = await this.pipeline.commitTransform();
+        this.transformOverlay.hide();
+        this._transformBeforePixels = null;
+        await this.history.execute({
+            type:         'transform',
+            label:        'Transform',
+            layerIndex,
+            beforePixels,
+            afterPixels,
+            timestamp:    this.history.now(),
+        });
+        this.emitStateChange();
+        this.bus.emit('transform:change', { active: false });
+    }
+
+    public cancelTransform(): void {
+        if (!this.pipeline.transformActive || !this._transformBeforePixels) return;
+        this.pipeline.cancelTransform(this._transformBeforePixels);
+        this.transformOverlay.hide();
+        this._transformBeforePixels = null;
+        this.bus.emit('transform:change', { active: false });
+    }
+
+    // ── Image Import (D7) ─────────────────────────────────────────────────────
+
+    public async importImage(file: File): Promise<void> {
+        const bitmap  = await createImageBitmap(file);
+        const imgW    = bitmap.width, imgH = bitmap.height;
+        const canvasW = this.pipeline.canvasWidth, canvasH = this.pipeline.canvasHeight;
+
+        // Scale to fit canvas (maintain aspect ratio, never upscale).
+        const scale   = Math.min(1, canvasW / imgW, canvasH / imgH);
+        const dw      = Math.round(imgW * scale);
+        const dh      = Math.round(imgH * scale);
+
+        // Render the image stretched to fill a full-canvas OffscreenCanvas.
+        // The transform shader samples from this via UV (0..1), and the
+        // initial transform state sets the visible region to (dw/canvasW, dh/canvasH).
+        const src = new OffscreenCanvas(canvasW, canvasH);
+        const ctx = src.getContext('2d')!;
+        ctx.drawImage(bitmap, 0, 0, canvasW, canvasH);
+        bitmap.close();
+
+        // Add a new layer and copy the stretched image into it.
+        await this.addLayer();
+        const layer = this.pipeline.layerManager.getActiveLayer()!;
+        this.pipeline.device.queue.copyExternalImageToTexture(
+            { source: src },
+            { texture: layer.texture, premultipliedAlpha: true },
+            [canvasW, canvasH]
+        );
+        await this.pipeline.device.queue.onSubmittedWorkDone();
+
+        // Snapshot the image pixels — these are the transform source.
+        const srcPixels = await this.pipeline.effectsPipeline.snapshotTexture(layer.texture);
+
+        // Enter transform at the fit-to-canvas scale, centered.
+        await this.enterTransform(srcPixels, {
+            cx:       0.5,
+            cy:       0.5,
+            scaleX:   dw / canvasW,
+            scaleY:   dh / canvasH,
+            rotation: 0,
+        });
     }
 
     // ── Coordinate conversion ─────────────────────────────────────────────────
@@ -548,5 +899,7 @@ export class PaintApp {
         s.top       = `calc(50% + ${this.nav.state.y}px)`;
         s.transform = `translate(-50%, -50%) rotate(${r}deg)`;
         s.position  = 'absolute';
+        // Keep transform overlay handles aligned with the canvas during pan/zoom/rotate.
+        if (this.pipeline.transformActive) this.transformOverlay.draw();
     }
 }

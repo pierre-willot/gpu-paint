@@ -456,14 +456,15 @@ export class StrokeEngine {
         }
 
         // ── Wet mixing (dilution) ─────────────────────────────────────────────
-        // wetness dilutes the brush; paintCharge tracks remaining paint load
+        // Wetness dilutes the brush (more transparent stamps so canvas color shows
+        // through). paintCharge tracks paint depletion independently of wetness.
+        // At wetness=1 → 30% opacity reduction; at wetness=0 → no dilution.
+        // Color pickup from the canvas is handled in the GPU shader (pickupTex).
         let wetness = d.wetness;
         if (luts && d.wetnessPressureCurve && d.wetnessPressureCurve.mode !== 'off') {
             wetness *= sampleDynLUT(luts, DLUT_WETNESS_PRESSURE, effP);
         }
-        const wetFactor = wetness > 0
-            ? this.paintCharge * (1.0 - wetness * 0.65) + wetness * 0.08
-            : this.paintCharge;
+        const wetFactor = this.paintCharge * (1.0 - wetness * 0.3);
 
         const finalSize = d.size * sizeMult * taperSize;
         let   finalOpacity = d.opacity * opacityMult * d.flow * flowMult * taperOpacity * wetFactor;

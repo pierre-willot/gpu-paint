@@ -214,8 +214,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         // bgra8unorm textures on Windows/DX12: bytes are stored BGRA but WebGPU
         // exposes them as .r=B .g=G .b=R .a=A in the sampler — swap R↔B channels.
         let pickupColor = vec3<f32>(pickupRaw.b, pickupRaw.g, pickupRaw.r);
-        // Blend brush color toward picked-up canvas color by wetness * 0.6
-        finalColor = mix(finalColor, pickupColor, u.pickupWetness * 0.6);
+        // Weight by pickup alpha so transparent canvas areas don't pull toward black.
+        // On empty canvas (alpha=0) this evaluates to 0, leaving finalColor unchanged.
+        let pickupStrength = u.pickupWetness * 0.7 * pickupRaw.a;
+        finalColor = mix(finalColor, pickupColor, pickupStrength);
     }
 
     // Return NON-PREMULTIPLIED. The blend state is src-alpha / one-minus-src-alpha.
