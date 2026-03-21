@@ -9,6 +9,7 @@ import {
     DLUT_ROUNDNESS_TILT, DLUT_ROUNDNESS_PRESSURE,
     DLUT_SCATTER_PRESSURE,
     DLUT_GRAIN_DEPTH,
+    DLUT_WETNESS_PRESSURE,
     DLUT_COLOR_MIX,
 } from './dynamics-lut';
 
@@ -456,8 +457,12 @@ export class StrokeEngine {
 
         // ── Wet mixing (dilution) ─────────────────────────────────────────────
         // wetness dilutes the brush; paintCharge tracks remaining paint load
-        const wetFactor = d.wetness > 0
-            ? this.paintCharge * (1.0 - d.wetness * 0.65) + d.wetness * 0.08
+        let wetness = d.wetness;
+        if (luts && d.wetnessPressureCurve && d.wetnessPressureCurve.mode !== 'off') {
+            wetness *= sampleDynLUT(luts, DLUT_WETNESS_PRESSURE, effP);
+        }
+        const wetFactor = wetness > 0
+            ? this.paintCharge * (1.0 - wetness * 0.65) + wetness * 0.08
             : this.paintCharge;
 
         const finalSize = d.size * sizeMult * taperSize;

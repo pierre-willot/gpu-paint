@@ -71,6 +71,17 @@ async function bootstrap() {
         }
         new PanelManager();
 
+        // Pen/stylus: set pointer capture immediately on sliders to bypass the OS-level
+        // gesture-classification delay (Windows Ink ~30–50ms palm rejection window).
+        document.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse') return;
+            const t = e.target as HTMLElement;
+            if (t.matches('input[type="range"]')) {
+                t.setPointerCapture(e.pointerId);
+            }
+        }, { passive: true });
+
+
         // ── Color ─────────────────────────────────────────────────────────────
         const colorState = new ColorState(app.bus);
         new ColorPickerUI(colorState);

@@ -1,27 +1,28 @@
 // src/ui/panel-manager.ts
-const PANEL_TOP      = 52 + 16; // header-h + 16px gap
-const INTERACTIVE    = 'button,input,select,textarea,[contenteditable],a,.layer-drag-handle';
+const PANEL_TOP   = 52 + 16; // header-h + 16px gap
+const INTERACTIVE = 'button,input,select,textarea,[contenteditable],a,.layer-drag-handle,summary,.bp-item,.bp-filter-chip';
 
 let globalResizing = false; // prevents drag firing during resize
 
 // ── Draggable (entire panel surface) ─────────────────────────────────────────
 
 export function makeDraggable(panel: HTMLElement): void {
-    let ox = 0, oy = 0, dragging = false;
+    let capturedId: number | null = null;
+    let ox = 0, oy = 0;
 
-    panel.addEventListener('mousedown', (e) => {
+    panel.addEventListener('pointerdown', (e) => {
         if (globalResizing) return;
         if ((e.target as HTMLElement).closest(INTERACTIVE)) return;
-        dragging = true;
-        const r  = panel.getBoundingClientRect();
+        e.preventDefault();
+        capturedId = e.pointerId;
+        panel.setPointerCapture(e.pointerId);
+        const r = panel.getBoundingClientRect();
         ox = e.clientX - r.left;
         oy = e.clientY - r.top;
-        document.body.style.cursor = 'grabbing';
-        e.preventDefault();
     });
 
-    document.addEventListener('mousemove', (e) => {
-        if (!dragging) return;
+    panel.addEventListener('pointermove', (e) => {
+        if (capturedId !== e.pointerId) return;
         const vw = window.innerWidth, vh = window.innerHeight;
         const pw = panel.offsetWidth,  ph = panel.offsetHeight;
         panel.style.left      = Math.max(0, Math.min(vw - pw, e.clientX - ox)) + 'px';
@@ -30,9 +31,12 @@ export function makeDraggable(panel: HTMLElement): void {
         panel.style.transform = 'none';
     });
 
-    document.addEventListener('mouseup', () => {
-        if (dragging) { dragging = false; document.body.style.cursor = ''; }
-    });
+    const stopDrag = (e: PointerEvent) => {
+        if (capturedId !== e.pointerId) return;
+        capturedId = null;
+    };
+    panel.addEventListener('pointerup',     stopDrag);
+    panel.addEventListener('pointercancel', stopDrag); // pen barrel button, system cancel, etc.
 }
 
 // ── All-edge resize ───────────────────────────────────────────────────────────
@@ -55,20 +59,23 @@ export function addResizeHandles(panel: HTMLElement, opts: ResizeOptions = {}): 
 
     for (const { d, s } of edges) {
         const handle = document.createElement('div');
-        handle.style.cssText = 'position:absolute;z-index:30;' + s;
+        // touch-action:none on each handle so the browser never delays gesture classification
+        handle.style.cssText = 'position:absolute;z-index:30;touch-action:none;' + s;
         panel.appendChild(handle);
 
-        handle.addEventListener('mousedown', (e) => {
+        handle.addEventListener('pointerdown', (e) => {
             e.preventDefault(); e.stopPropagation();
             globalResizing = true;
+            handle.setPointerCapture(e.pointerId);
+            const capturedId = e.pointerId;
             const sx = e.clientX, sy = e.clientY;
             const sw = panel.offsetWidth, sh = panel.offsetHeight;
             const rect = panel.getBoundingClientRect();
             const sl = rect.left, st = rect.top;
-            document.body.style.cursor = handle.style.cursor;
 
-            const onMove = (e: MouseEvent) => {
-                const dx = e.clientX - sx, dy = e.clientY - sy;
+            const onMove = (ev: PointerEvent) => {
+                if (ev.pointerId !== capturedId) return;
+                const dx = ev.clientX - sx, dy = ev.clientY - sy;
                 const vw = window.innerWidth, vh = window.innerHeight;
                 if (d.includes('e')) panel.style.width  = Math.max(minW, Math.min(vw - sl, sw + dx)) + 'px';
                 if (d.includes('s')) panel.style.height = Math.max(minH, Math.min(vh - st, sh + dy)) + 'px';
@@ -82,15 +89,17 @@ export function addResizeHandles(panel: HTMLElement, opts: ResizeOptions = {}): 
                 }
             };
 
-            const onUp = () => {
-                document.body.style.cursor = '';
+            const onUp = (ev: PointerEvent) => {
+                if (ev.pointerId !== capturedId) return;
                 globalResizing = false;
-                document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup',   onUp);
+                handle.removeEventListener('pointermove',   onMove);
+                handle.removeEventListener('pointerup',     onUp);
+                handle.removeEventListener('pointercancel', onUp);
             };
 
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup',   onUp);
+            handle.addEventListener('pointermove',   onMove);
+            handle.addEventListener('pointerup',     onUp);
+            handle.addEventListener('pointercancel', onUp); // critical: resets globalResizing on cancel
         });
     }
 }

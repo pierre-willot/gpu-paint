@@ -8,34 +8,66 @@ import type { SaveStatus }  from './event-bus';
 export function recordToCommand(r: StoredCommandRecord): Command {
     if (r.type === 'stroke') {
         return {
-            type:           'stroke',
-            label:          'Brush Stroke',
-            layerIndex:     r.layerIndex ?? 0,
-            stamps:         r.stampsBuffer ? new Float32Array(r.stampsBuffer) : new Float32Array(),
-            blendMode:      (r.blendMode ?? 'normal') as any,
-            floatsPerStamp: r.floatsPerStamp ?? 12,
-            timestamp:      0,
+            type:         'stroke',
+            label:        'Brush Stroke',
+            layerIndex:   r.layerIndex ?? 0,
+            beforePixels: r.beforeBuffer ? new Uint8Array(r.beforeBuffer) : new Uint8Array(),
+            afterPixels:  r.afterBuffer  ? new Uint8Array(r.afterBuffer)  : new Uint8Array(),
+            timestamp:    0,
         };
     }
-    if (r.type === 'add-layer') {
-        return { type: 'add-layer', label: (r.label as any) ?? 'Add Layer', layerIndex: r.layerIndex ?? 0, timestamp: 0 };
+    if (r.type === 'smudge') {
+        return {
+            type:         'smudge',
+            label:        'Smudge Stroke',
+            layerIndex:   r.layerIndex ?? 0,
+            beforePixels: r.beforeBuffer ? new Uint8Array(r.beforeBuffer) : new Uint8Array(),
+            afterPixels:  r.afterBuffer  ? new Uint8Array(r.afterBuffer)  : new Uint8Array(),
+            timestamp:    0,
+        };
     }
     if (r.type === 'cut') {
         return {
-            type:       'cut',
-            label:      'Cut',
-            layerIndex: r.layerIndex ?? 0,
-            pixels:     r.pixelsBuffer ? new Uint8Array(r.pixelsBuffer) : new Uint8Array(),
-            timestamp:  0,
+            type:         'cut',
+            label:        'Cut',
+            layerIndex:   r.layerIndex ?? 0,
+            beforePixels: r.beforeBuffer ? new Uint8Array(r.beforeBuffer) : new Uint8Array(),
+            afterPixels:  r.afterBuffer  ? new Uint8Array(r.afterBuffer)  : new Uint8Array(),
+            timestamp:    0,
+        };
+    }
+    if (r.type === 'transform') {
+        return {
+            type:         'transform',
+            label:        'Transform',
+            layerIndex:   r.layerIndex ?? 0,
+            beforePixels: r.beforeBuffer ? new Uint8Array(r.beforeBuffer) : new Uint8Array(),
+            afterPixels:  r.afterBuffer  ? new Uint8Array(r.afterBuffer)  : new Uint8Array(),
+            timestamp:    0,
         };
     }
     if (r.type === 'paste') {
         return {
             type:      'paste',
             label:     'Paste',
-            pixels:    r.pixelsBuffer ? new Uint8Array(r.pixelsBuffer) : new Uint8Array(),
+            pixels:    r.afterBuffer ? new Uint8Array(r.afterBuffer) : new Uint8Array(),
             timestamp: 0,
         };
+    }
+    if (r.type === 'selection') {
+        return {
+            type:       'selection',
+            label:      'Selection',
+            operation:  (r.operation ?? 'deselect') as any,
+            beforeMask: r.beforeBuffer ? new Uint8Array(r.beforeBuffer) : null,
+            afterMask:  r.afterBuffer  ? new Uint8Array(r.afterBuffer)  : null,
+            maskWidth:  r.maskWidth ?? 0,
+            maskHeight: r.maskHeight ?? 0,
+            timestamp:  0,
+        };
+    }
+    if (r.type === 'add-layer') {
+        return { type: 'add-layer', label: (r.label as any) ?? 'Add Layer', layerIndex: r.layerIndex ?? 0, timestamp: 0 };
     }
     return { type: 'delete-layer', label: 'Delete Layer', layerIndex: r.layerIndex ?? 0, timestamp: 0 };
 }
@@ -151,17 +183,17 @@ export class AutosaveManager {
         const record: StoredCheckpointRecord = {
             stackLength:      cp.stackLength - this.checkpointStackOffset,
             activeLayerIndex: cp.activeLayerIndex,
-            snapshots:        (cp.layers as any[]).map((l: any) => ({
-                dataBuffer:  (l.pixels as Uint8Array).buffer.slice(
-                    (l.pixels as Uint8Array).byteOffset,
-                    (l.pixels as Uint8Array).byteOffset + (l.pixels as Uint8Array).byteLength
+            snapshots:        cp.snapshots.map((l) => ({
+                dataBuffer:  l.data.buffer.slice(
+                    l.data.byteOffset,
+                    l.data.byteOffset + l.data.byteLength
                 ),
-                bytesPerRow: l.pixels?.length ?? 0,
+                bytesPerRow: l.bytesPerRow,
                 meta: {
-                    opacity:   l.opacity,
-                    blendMode: l.blendMode,
-                    visible:   l.visible,
-                    name:      l.name,
+                    opacity:   l.meta.opacity,
+                    blendMode: l.meta.blendMode,
+                    visible:   l.meta.visible,
+                    name:      l.meta.name,
                 },
             })),
         };
@@ -231,12 +263,17 @@ export class AutosaveManager {
         };
         if ('layerIndex' in cmd) base.layerIndex = cmd.layerIndex;
 
-        if (cmd.type === 'stroke') {
-            base.blendMode      = cmd.blendMode;
-            base.floatsPerStamp = cmd.floatsPerStamp;
-            base.stampsBuffer   = cmd.stamps.slice().buffer as ArrayBuffer;
-        } else if (cmd.type === 'cut' || cmd.type === 'paste') {
-            base.pixelsBuffer   = cmd.pixels.slice().buffer as ArrayBuffer;
+        if (cmd.type === 'stroke' || cmd.type === 'smudge' || cmd.type === 'cut' || cmd.type === 'transform') {
+            base.beforeBuffer = cmd.beforePixels.slice().buffer as ArrayBuffer;
+            base.afterBuffer  = cmd.afterPixels.slice().buffer as ArrayBuffer;
+        } else if (cmd.type === 'paste') {
+            base.afterBuffer = cmd.pixels.slice().buffer as ArrayBuffer;
+        } else if (cmd.type === 'selection') {
+            if (cmd.beforeMask) base.beforeBuffer = cmd.beforeMask.slice().buffer as ArrayBuffer;
+            if (cmd.afterMask)  base.afterBuffer  = cmd.afterMask.slice().buffer as ArrayBuffer;
+            base.maskWidth  = cmd.maskWidth;
+            base.maskHeight = cmd.maskHeight;
+            base.operation  = cmd.operation;
         }
         return base;
     }

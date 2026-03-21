@@ -262,7 +262,7 @@ header{
 
 /* ── Brush settings panel ───────────────────────────────────────────────────── */
 .brush-settings-panel{width:283px;min-width:238px;max-width:450px;min-height:200px;top:var(--panel-top)}
-.bs-body{flex:1;min-height:0;padding:8px 6px 8px;display:flex;flex-direction:column;gap:3px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent}
+.bs-body{flex:1;min-height:0;padding:8px 6px 8px;display:flex;flex-direction:column;gap:3px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent;touch-action:none}
 .bs-body::-webkit-scrollbar{width:3px}
 .bs-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px}
 .bs-panel-header{display:flex;align-items:center;justify-content:space-between;padding:0 2px 6px;border-bottom:none;margin-bottom:0;flex-shrink:0}
