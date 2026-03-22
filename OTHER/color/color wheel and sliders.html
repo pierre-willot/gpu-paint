@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Procreate style · RGB + HSV sliders + large color wheel</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background: #1a1c1e;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .app-container {
+      max-width: 1200px;  /* increased to accommodate larger wheel */
+      width: 100%;
+    }
+
+    .preview-panel {
+      background: #2b2f33;
+      border-radius: 32px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+      box-shadow: 0 20px 35px -8px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+      backdrop-filter: blur(2px);
+    }
+
+    .preview-section {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .color-swatch {
+      width: 80px;
+      height: 80px;
+      border-radius: 24px;
+      background: #3a6ea5;
+      box-shadow: 0 8px 18px -6px rgba(0, 0, 0, 0.7), 0 0 0 2px rgba(255, 255, 255, 0.05) inset;
+      transition: background 0.1s ease;
+      flex-shrink: 0;
+    }
+
+    .color-meta {
+      flex: 1;
+    }
+
+    .hex-label {
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      color: #a0a8b2;
+      margin-bottom: 6px;
+    }
+
+    .hex-value {
+      font-size: 28px;
+      font-weight: 600;
+      color: #f0f4fa;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      background: #1e2125;
+      display: inline-block;
+      padding: 4px 16px;
+      border-radius: 60px;
+      letter-spacing: 0.5px;
+      border: 1px solid rgba(255,255,255,0.05);
+      box-shadow: inset 0 2px 3px rgba(0,0,0,0.5);
+    }
+
+    .panels-row {
+      display: flex;
+      gap: 20px;
+      align-items: stretch;
+    }
+
+    .sliders-panel {
+      flex: 2 1 400px;
+      background: #2b2f33;
+      border-radius: 32px;
+      padding: 28px 24px;
+      box-shadow: 0 20px 35px -8px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+      backdrop-filter: blur(2px);
+    }
+
+    .wheel-panel {
+      flex: 1 1 320px;  /* give more space for larger wheel */
+      background: #2b2f33;
+      border-radius: 32px;
+      padding: 24px 20px;
+      box-shadow: 0 20px 35px -8px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+      backdrop-filter: blur(2px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .slider-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 32px;
+    }
+
+    .slider-group {
+      flex: 1 1 260px;
+    }
+
+    .slider-group h3 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-weight: 500;
+      color: #b6c0cc;
+      margin-bottom: 22px;
+      border-left: 3px solid #4f9cff;
+      padding-left: 12px;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 22px;
+    }
+
+    .slider-label {
+      width: 24px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #dae2ed;
+      text-align: right;
+      letter-spacing: 0.2px;
+    }
+
+    .slider {
+      flex: 1;
+      height: 18px;
+      -webkit-appearance: none;
+      background: transparent;
+      border-radius: 30px;
+      outline: none;
+    }
+
+    .slider::-webkit-slider-runnable-track {
+      height: 18px;
+      border-radius: 30px;
+      background: #33373c;
+      border: none;
+    }
+
+    .slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      background: transparent;
+      border: 2px solid white;
+      border-radius: 50%;
+      margin-top: 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+      cursor: grab;
+      transition: 0.08s ease;
+    }
+    .slider::-webkit-slider-thumb:hover {
+      transform: scale(1.15);
+      border-color: #f0f4ff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.8);
+    }
+    .slider::-webkit-slider-thumb:active {
+      cursor: grabbing;
+      transform: scale(1.05);
+    }
+    .slider::-moz-range-track {
+      height: 18px;
+      border-radius: 30px;
+      background: #33373c;
+      border: none;
+    }
+    .slider::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      background: transparent;
+      border: 2px solid white;
+      border-radius: 50%;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+      cursor: grab;
+    }
+    .slider::-moz-range-thumb:hover {
+      transform: scale(1.15);
+      border-color: #f0f4ff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.8);
+    }
+
+    .slider-value {
+      min-width: 42px;
+      text-align: right;
+      font-size: 14px;
+      font-weight: 500;
+      color: #d1dae8;
+      background: #1f2328;
+      padding: 4px 8px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.04);
+      font-feature-settings: "tnum";
+      letter-spacing: 0.3px;
+    }
+
+    #redSlider::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--red-start), var(--red-end)); }
+    #redSlider::-moz-range-track { background: linear-gradient(to right, var(--red-start), var(--red-end)); }
+    #greenSlider::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--green-start), var(--green-end)); }
+    #greenSlider::-moz-range-track { background: linear-gradient(to right, var(--green-start), var(--green-end)); }
+    #blueSlider::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--blue-start), var(--blue-end)); }
+    #blueSlider::-moz-range-track { background: linear-gradient(to right, var(--blue-start), var(--blue-end)); }
+    #hueSlider::-webkit-slider-runnable-track { background: linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000); }
+    #hueSlider::-moz-range-track { background: linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000); }
+    #satSlider::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--sat-start), var(--sat-end)); }
+    #satSlider::-moz-range-track { background: linear-gradient(to right, var(--sat-start), var(--sat-end)); }
+    #valSlider::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--val-start), var(--val-end)); }
+    #valSlider::-moz-range-track { background: linear-gradient(to right, var(--val-start), var(--val-end)); }
+
+    .wheel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .wheel-header h3 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-weight: 500;
+      color: #b6c0cc;
+      border-left: 3px solid #4f9cff;
+      padding-left: 12px;
+    }
+
+    .toggle-buttons {
+      display: flex;
+      gap: 6px;
+      background: #1e2125;
+      padding: 4px;
+      border-radius: 40px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .toggle-btn {
+      background: transparent;
+      border: none;
+      color: #9aa3b0;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 16px;
+      border-radius: 30px;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .toggle-btn.active {
+      background: #3f4a5a;
+      color: white;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+
+    .canvas-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-top: 4px;
+      flex: 1;
+    }
+
+    #colorWheelCanvas {
+      width: 260px;
+      height: 260px;
+      border-radius: 50%;
+      box-shadow: 0 10px 20px -8px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.06) inset;
+      background: #202020;
+      cursor: crosshair;
+    }
+
+    .slider:focus {
+      outline: none;
+    }
+    .slider:focus::-webkit-slider-thumb {
+      box-shadow: 0 0 0 3px rgba(79, 156, 255, 0.4), 0 2px 8px rgba(0,0,0,0.6);
+    }
+
+    @media (max-width: 900px) {
+      .panels-row { flex-direction: column; }
+      .wheel-panel { align-items: center; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <div class="preview-panel">
+      <div class="preview-section">
+        <div class="color-swatch" id="colorSwatch"></div>
+        <div class="color-meta">
+          <div class="hex-label">HEX</div>
+          <div class="hex-value" id="hexDisplay">#0078ff</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panels-row">
+      <div class="sliders-panel">
+        <div class="slider-grid">
+          <div class="slider-group">
+            <h3>RGB · red green blue</h3>
+            <div class="slider-row"><span class="slider-label">R</span><input type="range" id="redSlider" class="slider" min="0" max="255" value="0" step="1"><span class="slider-value" id="redVal">0</span></div>
+            <div class="slider-row"><span class="slider-label">G</span><input type="range" id="greenSlider" class="slider" min="0" max="255" value="120" step="1"><span class="slider-value" id="greenVal">120</span></div>
+            <div class="slider-row"><span class="slider-label">B</span><input type="range" id="blueSlider" class="slider" min="0" max="255" value="255" step="1"><span class="slider-value" id="blueVal">255</span></div>
+          </div>
+          <div class="slider-group">
+            <h3>HSV · hue saturation value</h3>
+            <div class="slider-row"><span class="slider-label">H</span><input type="range" id="hueSlider" class="slider" min="0" max="360" value="212" step="1"><span class="slider-value" id="hueVal">212°</span></div>
+            <div class="slider-row"><span class="slider-label">S</span><input type="range" id="satSlider" class="slider" min="0" max="100" value="100" step="1"><span class="slider-value" id="satVal">100%</span></div>
+            <div class="slider-row"><span class="slider-label">V</span><input type="range" id="valSlider" class="slider" min="0" max="100" value="100" step="1"><span class="slider-value" id="valVal">100%</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="wheel-panel">
+        <div class="wheel-header">
+          <h3>color wheel</h3>
+          <div class="toggle-buttons">
+            <button class="toggle-btn active" id="hsvModeBtn">HSV</button>
+            <button class="toggle-btn" id="hslModeBtn">HLS</button>
+          </div>
+        </div>
+        <div class="canvas-container">
+          <canvas id="colorWheelCanvas" width="260" height="260"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      // DOM elements
+      const swatch = document.getElementById('colorSwatch');
+      const hexDisplay = document.getElementById('hexDisplay');
+
+      const redSlider = document.getElementById('redSlider');
+      const greenSlider = document.getElementById('greenSlider');
+      const blueSlider = document.getElementById('blueSlider');
+      const redVal = document.getElementById('redVal');
+      const greenVal = document.getElementById('greenVal');
+      const blueVal = document.getElementById('blueVal');
+
+      const hueSlider = document.getElementById('hueSlider');
+      const satSlider = document.getElementById('satSlider');
+      const valSlider = document.getElementById('valSlider');
+      const hueVal = document.getElementById('hueVal');
+      const satVal = document.getElementById('satVal');
+      const valVal = document.getElementById('valVal');
+
+      const canvas = document.getElementById('colorWheelCanvas');
+      const ctx = canvas.getContext('2d');
+      const hsvBtn = document.getElementById('hsvModeBtn');
+      const hslBtn = document.getElementById('hslModeBtn');
+
+      // State
+      let state = { r: 0, g: 120, b: 255, h: 212, s: 100, v: 100 };
+      let colorMode = 'hsv'; // 'hsv' or 'hsl'
+      let updating = false;
+
+      // Conversion utilities
+      function hsvToRgb(h, s, v) {
+        let sNorm = s / 100, vNorm = v / 100;
+        let c = vNorm * sNorm;
+        let hp = h / 60;
+        let x = c * (1 - Math.abs((hp % 2) - 1));
+        let r1, g1, b1;
+        if (hp >= 0 && hp < 1) { r1 = c; g1 = x; b1 = 0; }
+        else if (hp >= 1 && hp < 2) { r1 = x; g1 = c; b1 = 0; }
+        else if (hp >= 2 && hp < 3) { r1 = 0; g1 = c; b1 = x; }
+        else if (hp >= 3 && hp < 4) { r1 = 0; g1 = x; b1 = c; }
+        else if (hp >= 4 && hp < 5) { r1 = x; g1 = 0; b1 = c; }
+        else { r1 = c; g1 = 0; b1 = x; }
+        let m = vNorm - c;
+        return {
+          r: Math.round((r1 + m) * 255),
+          g: Math.round((g1 + m) * 255),
+          b: Math.round((b1 + m) * 255)
+        };
+      }
+
+      function rgbToHsv(r, g, b) {
+        let rNorm = r/255, gNorm = g/255, bNorm = b/255;
+        let max = Math.max(rNorm, gNorm, bNorm);
+        let min = Math.min(rNorm, gNorm, bNorm);
+        let delta = max - min;
+        let h = 0;
+        if (delta !== 0) {
+          if (max === rNorm) h = 60 * (((gNorm - bNorm) / delta) % 6);
+          else if (max === gNorm) h = 60 * (((bNorm - rNorm) / delta) + 2);
+          else h = 60 * (((rNorm - gNorm) / delta) + 4);
+        }
+        if (h < 0) h += 360;
+        let s = (max === 0) ? 0 : (delta / max) * 100;
+        let v = max * 100;
+        return { h: Math.round(h), s: Math.round(s), v: Math.round(v) };
+      }
+
+      function hslToRgb(h, s, l) {
+        h /= 360; s /= 100; l /= 100;
+        let r, g, b;
+        if (s === 0) {
+          r = g = b = l;
+        } else {
+          const hue2rgb = (p, q, t) => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1/6) return p + (q - p) * 6 * t;
+            if (t < 1/2) return q;
+            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+          };
+          let q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+          let p = 2 * l - q;
+          r = hue2rgb(p, q, h + 1/3);
+          g = hue2rgb(p, q, h);
+          b = hue2rgb(p, q, h - 1/3);
+        }
+        return {
+          r: Math.round(r * 255),
+          g: Math.round(g * 255),
+          b: Math.round(b * 255)
+        };
+      }
+
+      function rgbToHsl(r, g, b) {
+        r /= 255; g /= 255; b /= 255;
+        let max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h, s, l = (max + min) / 2;
+        if (max === min) {
+          h = s = 0;
+        } else {
+          let d = max - min;
+          s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+          switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+          }
+          h /= 6;
+        }
+        return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+      }
+
+      // Gradient updates for sliders
+      function updateGradients() {
+        redSlider.style.setProperty('--red-start', `rgb(0, ${state.g}, ${state.b})`);
+        redSlider.style.setProperty('--red-end', `rgb(255, ${state.g}, ${state.b})`);
+        greenSlider.style.setProperty('--green-start', `rgb(${state.r}, 0, ${state.b})`);
+        greenSlider.style.setProperty('--green-end', `rgb(${state.r}, 255, ${state.b})`);
+        blueSlider.style.setProperty('--blue-start', `rgb(${state.r}, ${state.g}, 0)`);
+        blueSlider.style.setProperty('--blue-end', `rgb(${state.r}, ${state.g}, 255)`);
+        let grayLevel = Math.round(state.v * 255 / 100);
+        let fullSatRgb = hsvToRgb(state.h, 100, state.v);
+        satSlider.style.setProperty('--sat-start', `rgb(${grayLevel}, ${grayLevel}, ${grayLevel})`);
+        satSlider.style.setProperty('--sat-end', `rgb(${fullSatRgb.r}, ${fullSatRgb.g}, ${fullSatRgb.b})`);
+        let fullValRgb = hsvToRgb(state.h, state.s, 100);
+        valSlider.style.setProperty('--val-start', 'rgb(0, 0, 0)');
+        valSlider.style.setProperty('--val-end', `rgb(${fullValRgb.r}, ${fullValRgb.g}, ${fullValRgb.b})`);
+      }
+
+      function updateAllFromRgb() {
+        updating = true;
+        let hsv = rgbToHsv(state.r, state.g, state.b);
+        state.h = hsv.h; state.s = hsv.s; state.v = hsv.v;
+        redSlider.value = state.r; greenSlider.value = state.g; blueSlider.value = state.b;
+        hueSlider.value = state.h; satSlider.value = state.s; valSlider.value = state.v;
+        redVal.textContent = state.r; greenVal.textContent = state.g; blueVal.textContent = state.b;
+        hueVal.textContent = state.h + '°'; satVal.textContent = state.s + '%'; valVal.textContent = state.v + '%';
+        let hex = '#' + ((1 << 24) + (state.r << 16) + (state.g << 8) + state.b).toString(16).slice(1).toUpperCase();
+        swatch.style.backgroundColor = `rgb(${state.r}, ${state.g}, ${state.b})`;
+        hexDisplay.textContent = hex;
+        updateGradients();
+        drawWheel();
+        updating = false;
+      }
+
+      function updateAllFromHsv() {
+        updating = true;
+        let rgb = hsvToRgb(state.h, state.s, state.v);
+        state.r = rgb.r; state.g = rgb.g; state.b = rgb.b;
+        redSlider.value = state.r; greenSlider.value = state.g; blueSlider.value = state.b;
+        hueSlider.value = state.h; satSlider.value = state.s; valSlider.value = state.v;
+        redVal.textContent = state.r; greenVal.textContent = state.g; blueVal.textContent = state.b;
+        hueVal.textContent = state.h + '°'; satVal.textContent = state.s + '%'; valVal.textContent = state.v + '%';
+        let hex = '#' + ((1 << 24) + (state.r << 16) + (state.g << 8) + state.b).toString(16).slice(1).toUpperCase();
+        swatch.style.backgroundColor = `rgb(${state.r}, ${state.g}, ${state.b})`;
+        hexDisplay.textContent = hex;
+        updateGradients();
+        drawWheel();
+        updating = false;
+      }
+
+      // ---------- Draw color wheel (large version) ----------
+      function drawWheel() {
+        const w = 260, h = 260;
+        const cx = 130, cy = 130;
+
+        // Ring dimensions: thickness 18px, gap 4px from inner picker
+        const ringOuter = 118;      // leaves ~12px margin from canvas edge
+        const ringInner = 100;      // 118 - 18
+        const gap = 4;
+        const innerRadius = ringInner - gap; // 96
+
+        // Clear canvas
+        ctx.clearRect(0, 0, w, h);
+
+        // Draw hue ring pixel by pixel (using squared distances for precision)
+        const imageData = ctx.getImageData(0, 0, w, h);
+        const data = imageData.data;
+        const rOuterSq = ringOuter * ringOuter;
+        const rInnerSq = ringInner * ringInner;
+
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const dx = x - cx;
+            const dy = y - cy;
+            const distSq = dx*dx + dy*dy;
+            const index = (y * w + x) * 4;
+
+            if (distSq >= rInnerSq && distSq <= rOuterSq) {
+              let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+              if (angle < 0) angle += 360;
+              let hue = angle;
+              let rgb;
+              if (colorMode === 'hsv') {
+                rgb = hsvToRgb(hue, 100, 100);
+              } else {
+                rgb = hslToRgb(hue, 100, 50);
+              }
+              data[index] = rgb.r;
+              data[index+1] = rgb.g;
+              data[index+2] = rgb.b;
+              data[index+3] = 255;
+            } else {
+              data[index] = 0;
+              data[index+1] = 0;
+              data[index+2] = 0;
+              data[index+3] = 0;
+            }
+          }
+        }
+        ctx.putImageData(imageData, 0, 0);
+
+        // Triangle radius: almost as large as innerRadius
+        const triRadius = innerRadius * 0.98; // ~94
+
+        if (colorMode === 'hsv') {
+          // Square: side length 136 (fits within radius 96: 136/√2 ≈ 96.2, close enough)
+          const side = 136;
+          const left = cx - side/2;
+          const top = cy - side/2;
+          const right = left + side;
+          const bottom = top + side;
+
+          for (let y = top; y < bottom; y++) {
+            for (let x = left; x < right; x++) {
+              if (x < 0 || x >= w || y < 0 || y >= h) continue;
+              const dx = x - cx, dy = y - cy;
+              if (dx*dx + dy*dy >= innerRadius*innerRadius) continue;
+
+              const normX = (x - left) / side;
+              const normY = 1 - (y - top) / side;
+              const sat = normX * 100;
+              const val = normY * 100;
+              const rgb = hsvToRgb(state.h, sat, val);
+              ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+              ctx.fillRect(x, y, 1, 1);
+            }
+          }
+        } else {
+          // Equilateral triangle with saturated side on the right.
+          const cos30 = Math.sqrt(3)/2;
+          const pureX = cx + triRadius;
+          const pureY = cy;
+          const whiteX = cx - triRadius/2;
+          const whiteY = cy - triRadius * cos30;
+          const blackX = cx - triRadius/2;
+          const blackY = cy + triRadius * cos30;
+
+          // Bounding box
+          const minX = Math.floor(Math.min(pureX, whiteX, blackX));
+          const maxX = Math.ceil(Math.max(pureX, whiteX, blackX));
+          const minY = Math.floor(Math.min(pureY, whiteY, blackY));
+          const maxY = Math.ceil(Math.max(pureY, whiteY, blackY));
+
+          for (let y = minY; y <= maxY; y++) {
+            for (let x = minX; x <= maxX; x++) {
+              if (x < 0 || x >= w || y < 0 || y >= h) continue;
+              const dx = x - cx, dy = y - cy;
+              if (dx*dx + dy*dy >= innerRadius*innerRadius) continue;
+
+              // Barycentric coordinates relative to triangle (pure, white, black)
+              const v0 = { x: blackX - pureX, y: blackY - pureY };
+              const v1 = { x: whiteX - pureX, y: whiteY - pureY };
+              const v2 = { x: x - pureX, y: y - pureY };
+
+              const dot00 = v0.x*v0.x + v0.y*v0.y;
+              const dot01 = v0.x*v1.x + v0.y*v1.y;
+              const dot02 = v0.x*v2.x + v0.y*v2.y;
+              const dot11 = v1.x*v1.x + v1.y*v1.y;
+              const dot12 = v1.x*v2.x + v1.y*v2.y;
+
+              const invDenom = 1 / (dot00 * dot11 - dot01 * dot01);
+              const u = (dot11 * dot02 - dot01 * dot12) * invDenom; // weight for black
+              const v = (dot00 * dot12 - dot01 * dot02) * invDenom; // weight for white
+              const wBary = 1 - u - v;                               // weight for pure
+
+              if (u >= 0 && v >= 0 && wBary >= 0) {
+                let lightness = v + 0.5 * wBary;
+                let sat = wBary;
+                lightness = Math.min(1, Math.max(0, lightness));
+                sat = Math.min(1, Math.max(0, sat));
+                const rgb = hslToRgb(state.h, sat * 100, lightness * 100);
+                ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+                ctx.fillRect(x, y, 1, 1);
+              }
+            }
+          }
+        }
+
+        // Draw indicators (hollow circles)
+        const hueAngle = state.h * Math.PI / 180;
+        const ringRadius = (ringInner + ringOuter) / 2; // 109
+        const hueX = cx + ringRadius * Math.cos(hueAngle);
+        const hueY = cy + ringRadius * Math.sin(hueAngle);
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 6;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 1;
+        ctx.beginPath();
+        ctx.arc(hueX, hueY, 8, 0, 2*Math.PI);
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        let innerX, innerY;
+        if (colorMode === 'hsv') {
+          const side = 136;
+          const left = cx - side/2;
+          const top = cy - side/2;
+          const sNorm = state.s / 100;
+          const vNorm = state.v / 100;
+          innerX = left + sNorm * side;
+          innerY = top + (1 - vNorm) * side;
+        } else {
+          const hsl = rgbToHsl(state.r, state.g, state.b);
+          const satNorm = hsl.s / 100;
+          const lNorm = hsl.l / 100;
+          let wPure = satNorm;
+          let wWhite = lNorm - 0.5 * satNorm;
+          let wBlack = 1 - lNorm - 0.5 * satNorm;
+          if (wWhite < 0) wWhite = 0;
+          if (wBlack < 0) wBlack = 0;
+          const sum = wPure + wWhite + wBlack;
+          if (sum > 0) {
+            wPure /= sum;
+            wWhite /= sum;
+            wBlack /= sum;
+          }
+          const cos30 = Math.sqrt(3)/2;
+          const pureX = cx + triRadius;
+          const pureY = cy;
+          const whiteX = cx - triRadius/2;
+          const whiteY = cy - triRadius * cos30;
+          const blackX = cx - triRadius/2;
+          const blackY = cy + triRadius * cos30;
+          innerX = wPure * pureX + wWhite * whiteX + wBlack * blackX;
+          innerY = wPure * pureY + wWhite * whiteY + wBlack * blackY;
+        }
+        ctx.beginPath();
+        ctx.arc(innerX, innerY, 8, 0, 2*Math.PI);
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+
+      // Wheel click handling
+      function handleWheelClick(e) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        let mouseX = (e.clientX - rect.left) * scaleX;
+        let mouseY = (e.clientY - rect.top) * scaleY;
+
+        const cx = 130, cy = 130;
+        const dx = mouseX - cx, dy = mouseY - cy;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+
+        const ringOuter = 118;
+        const ringInner = 100;
+        const gap = 4;
+        const innerRadius = ringInner - gap;
+
+        if (dist >= ringInner && dist <= ringOuter) {
+          let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+          if (angle < 0) angle += 360;
+          state.h = Math.round(angle);
+          updateAllFromHsv();
+          return;
+        }
+
+        if (dist < innerRadius) {
+          if (colorMode === 'hsv') {
+            const side = 136;
+            const left = cx - side/2;
+            const top = cy - side/2;
+            const right = left + side;
+            const bottom = top + side;
+            if (mouseX >= left && mouseX <= right && mouseY >= top && mouseY <= bottom) {
+              const sNorm = (mouseX - left) / side;
+              const vNorm = 1 - (mouseY - top) / side;
+              state.s = Math.round(Math.min(100, Math.max(0, sNorm * 100)));
+              state.v = Math.round(Math.min(100, Math.max(0, vNorm * 100)));
+              updateAllFromHsv();
+            }
+          } else {
+            const triRadius = innerRadius * 0.98;
+            const cos30 = Math.sqrt(3)/2;
+            const pureX = cx + triRadius;
+            const pureY = cy;
+            const whiteX = cx - triRadius/2;
+            const whiteY = cy - triRadius * cos30;
+            const blackX = cx - triRadius/2;
+            const blackY = cy + triRadius * cos30;
+
+            const v0 = { x: blackX - pureX, y: blackY - pureY };
+            const v1 = { x: whiteX - pureX, y: whiteY - pureY };
+            const v2 = { x: mouseX - pureX, y: mouseY - pureY };
+
+            const dot00 = v0.x*v0.x + v0.y*v0.y;
+            const dot01 = v0.x*v1.x + v0.y*v1.y;
+            const dot02 = v0.x*v2.x + v0.y*v2.y;
+            const dot11 = v1.x*v1.x + v1.y*v1.y;
+            const dot12 = v1.x*v2.x + v1.y*v2.y;
+
+            const invDenom = 1 / (dot00 * dot11 - dot01 * dot01);
+            const u = (dot11 * dot02 - dot01 * dot12) * invDenom; // black
+            const v = (dot00 * dot12 - dot01 * dot02) * invDenom; // white
+            const w = 1 - u - v;                                   // pure
+
+            if (u >= 0 && v >= 0 && w >= 0) {
+              let lightness = v + 0.5 * w;
+              let sat = w;
+              lightness = Math.min(1, Math.max(0, lightness));
+              sat = Math.min(1, Math.max(0, sat));
+              let rgb = hslToRgb(state.h, sat * 100, lightness * 100);
+              let hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+              state.h = hsv.h;
+              state.s = hsv.s;
+              state.v = hsv.v;
+              updateAllFromHsv();
+            }
+          }
+        }
+      }
+
+      canvas.addEventListener('mousedown', handleWheelClick);
+      canvas.addEventListener('mousemove', (e) => {
+        if (e.buttons === 1) handleWheelClick(e);
+      });
+
+      // Mode toggle
+      function setMode(mode) {
+        if (mode === colorMode) return;
+        colorMode = mode;
+        hsvBtn.classList.toggle('active', mode === 'hsv');
+        hslBtn.classList.toggle('active', mode === 'hsl');
+        drawWheel();
+      }
+      hsvBtn.addEventListener('click', () => setMode('hsv'));
+      hslBtn.addEventListener('click', () => setMode('hsl'));
+
+      // Slider events
+      function onRgbChange() { if (updating) return; state.r = parseInt(redSlider.value); state.g = parseInt(greenSlider.value); state.b = parseInt(blueSlider.value); updateAllFromRgb(); }
+      function onHueChange() { if (updating) return; state.h = parseInt(hueSlider.value); updateAllFromHsv(); }
+      function onSatChange() { if (updating) return; state.s = parseInt(satSlider.value); updateAllFromHsv(); }
+      function onValChange() { if (updating) return; state.v = parseInt(valSlider.value); updateAllFromHsv(); }
+
+      redSlider.addEventListener('input', onRgbChange);
+      greenSlider.addEventListener('input', onRgbChange);
+      blueSlider.addEventListener('input', onRgbChange);
+      hueSlider.addEventListener('input', onHueChange);
+      satSlider.addEventListener('input', onSatChange);
+      valSlider.addEventListener('input', onValChange);
+
+      // Initial update
+      (function init() {
+        state.r = 0; state.g = 120; state.b = 255;
+        let hsv = rgbToHsv(0, 120, 255);
+        state.h = hsv.h; state.s = hsv.s; state.v = hsv.v;
+        updateAllFromRgb();
+      })();
+    })();
+  </script>
+</body>
+</html>

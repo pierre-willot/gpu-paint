@@ -8,6 +8,7 @@
     "build": "vite build",
     "type-check": "tsc --noEmit",
     "preview": "vite preview",
+    "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"
   },
   "keywords": [],

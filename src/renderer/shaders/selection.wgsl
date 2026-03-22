@@ -66,7 +66,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // Approximate arc-length position along the boundary using a diagonal of
     // screen-space coordinates. This is not true arc-length but gives the
     // visual appearance of continuous movement at low cost.
-    let dashPos = (uv.x * u.resolution.x + uv.y * u.resolution.y + u.time * 80.0);
+    let dashPos = (uv.x * u.resolution.x + uv.y * u.resolution.y + u.time * 8.0);
     let dashLen: f32 = 8.0; // pixels per dash+gap
     let isWhite = (dashPos % dashLen) < (dashLen * 0.5);
 

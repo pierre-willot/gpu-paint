@@ -14,6 +14,8 @@ function closeEffect(id: string): void { document.getElementById(id)?.classList.
 // ── Quick search data ─────────────────────────────────────────────────────────
 
 const SEARCH_ITEMS = [
+    { name: 'Brush Panel',      sc: ''          },
+    { name: 'Tool Settings',    sc: ''          },
     { name: 'Brush',            sc: 'B'         },
     { name: 'Eraser',           sc: 'E'         },
     { name: 'Eyedropper',       sc: 'I'         },
@@ -57,6 +59,7 @@ export class MenuManager {
         this.wireEditMenu();
         this.wireEffectsMenu();
         this.wireViewMenu();
+        this.wireWindowMenu();
         this.wireEffectPanels();   // D3 — live preview
         this.wireSelectionPopup(); // C2/C3
         this.wireExportPanel();
@@ -75,7 +78,8 @@ export class MenuManager {
     private setupDropdowns(): void {
         const pairs: [string, string][] = [
             ['btnFile','menuFile'],['btnEdit','menuEdit'],
-            ['btnEffects','menuEffects'],['btnView','menuView'],['btnAbout','menuAbout'],
+            ['btnEffects','menuEffects'],['btnView','menuView'],
+            ['btnWindow','menuWindow'],['btnAbout','menuAbout'],
         ];
         for (const [btnId, menuId] of pairs) {
             const btn  = document.getElementById(btnId);
@@ -114,8 +118,8 @@ export class MenuManager {
     // ── File menu ─────────────────────────────────────────────────────────────
 
     private wireFileMenu(): void {
-        this.on('menu-new',           () => this.sizeDialog?.openNew() ?? (confirm('New canvas?') && this.app.clearLayer()));
-        this.on('menu-open',          () => this.openFileInput());
+        this.on('menu-new',  () => this.sizeDialog?.openNew());
+        this.on('menu-open', () => this.openFileInput());
         this.on('menu-save',          () => this.autosave?.saveNow());
         this.on('menu-save-project',  () => this.app.saveProject());
         this.on('menu-export',        () => { this.closeAll(); document.getElementById('exportPanel')!.style.display = 'flex'; });
@@ -168,6 +172,17 @@ export class MenuManager {
         this.on('menu-rotate-ccw',     () => this.app.nav.rotateBy(-15));
         this.on('menu-reset-rotation', () => this.app.nav.setRotation(0));
         this.on('menu-focus',          () => document.getElementById('focusExitBtn')?.click());
+    }
+
+    // ── Window menu ───────────────────────────────────────────────────────────
+
+    private wireWindowMenu(): void {
+        this.on('menu-window-brushes',        () => this.togglePanel('brushPanel'));
+        this.on('menu-window-brush-settings', () => this.togglePanel('brushSettingsPanel'));
+        this.on('menu-window-layers',         () => document.getElementById('layerToggleBtn')?.click());
+        this.on('menu-window-color',          () => document.getElementById('colorToggleBtn')?.click());
+        this.on('menu-window-prefs',          () => this.togglePanel('prefsPanel'));
+        this.on('menu-window-export',         () => this.togglePanel('exportPanel'));
     }
 
     // ── D3 — Effect panels with live preview ──────────────────────────────────
@@ -355,29 +370,46 @@ export class MenuManager {
             }
         });
 
-        // Type buttons
+        // Type buttons — floating popup + Tool Group panel (tg-selType*)
+        // Type is a tool VARIATION (not a setting), so it only lives in these two places.
         const typeMap: [string, 'rect' | 'lasso' | 'poly'][] = [
             ['selTypeRect', 'rect'], ['selTypeLasso', 'lasso'], ['selTypePoly', 'poly']
         ];
+        const tgTypeMap: [string, 'rect' | 'lasso' | 'poly'][] = [
+            ['tg-selTypeRect', 'rect'], ['tg-selTypeLasso', 'lasso'], ['tg-selTypePoly', 'poly']
+        ];
+        const syncTypeActive = (type: string) => {
+            [...typeMap, ...tgTypeMap].forEach(([id, t]) =>
+                document.getElementById(id)?.classList.toggle('active', t === type)
+            );
+        };
+        // Popup buttons wire here; tg-* buttons are wired in BrushPanel.wireSelectionSection()
         for (const [id, type] of typeMap) {
             document.getElementById(id)?.addEventListener('click', () => {
                 selTool.setType(type);
-                // Visual active state
-                typeMap.forEach(([tid]) => document.getElementById(tid)?.classList.remove('active'));
-                document.getElementById(id)?.classList.add('active');
+                syncTypeActive(type);
             });
         }
 
-        // Mode buttons
+        // Mode buttons — floating popup + Tool Settings panel (bs-selMode*)
+        // Mode is a tool SETTING, so it only lives in these two places.
         const modeMap: [string, 'replace' | 'add' | 'subtract' | 'intersect'][] = [
             ['selModeReplace', 'replace'], ['selModeAdd', 'add'],
             ['selModeSub', 'subtract'],    ['selModeInt', 'intersect'],
         ];
-        for (const [id, mode] of modeMap) {
+        const bsModeMap: [string, 'replace' | 'add' | 'subtract' | 'intersect'][] = [
+            ['bs-selModeReplace', 'replace'], ['bs-selModeAdd', 'add'],
+            ['bs-selModeSub', 'subtract'],    ['bs-selModeInt', 'intersect'],
+        ];
+        const syncModeActive = (mode: string) => {
+            [...modeMap, ...bsModeMap].forEach(([id, m]) =>
+                document.getElementById(id)?.classList.toggle('active', m === mode)
+            );
+        };
+        for (const [id, mode] of [...modeMap, ...bsModeMap]) {
             document.getElementById(id)?.addEventListener('click', () => {
                 selTool.setMode(mode);
-                modeMap.forEach(([mid]) => document.getElementById(mid)?.classList.remove('active'));
-                document.getElementById(id)?.classList.add('active');
+                syncModeActive(mode);
             });
         }
 

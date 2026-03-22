@@ -1,20 +1,38 @@
 // ── BrushDescriptor ───────────────────────────────────────────────────────────
-// The single source of truth for all brush parameters.
+// Single source of truth for all brush parameters.
 //
 // Design principles:
-//   • Fully serializable to JSON — can be saved in .gpaint manifests and
-//     shared as preset files
-//   • Sent to the stroke worker via postMessage as a plain object (structured
-//     clone) — no classes, no non-serializable fields except pressureLUT which
-//     is sent separately as a transferable Float32Array
-//   • All per-stamp decisions are made in the worker using this descriptor —
-//     zero main-thread math in the hot path
-//   • blendMode is part of the descriptor so eraser is just a brush with
-//     blendMode:'erase' — no special-case code
+//   • Fully serializable to JSON — no Float32Arrays or class instances
+//   • Structured-cloned by postMessage to the stroke worker
+//   • DynamicsLUTs (Float32Array) are built from CurveSpecs by dynamics-lut.ts
+//     and transferred separately — never stored here
 
 export type BrushBlendMode = 'normal' | 'erase';
+export type GrainBlendMode = 'multiply' | 'screen' | 'overlay' | 'normal';
+
+// ── CurveSpec ─────────────────────────────────────────────────────────────────
+// JSON-serializable description of a 1D response curve mapping input [0..1]
+// to output [min..max].  Converted to a 256-entry Float32Array LUT at runtime
+// by `curveSpecToLUT` in dynamics-lut.ts.
+
+export interface CurveSpec {
+    /** 'off' = identity (1.0), 'linear' = straight ramp, 'bezier' = CSS cubic */
+    mode:  'off' | 'linear' | 'bezier';
+    p1x?:  number;   // bezier control point 1 x (default 0.42)
+    p1y?:  number;   // bezier control point 1 y (default 0.0)
+    p2x?:  number;   // bezier control point 2 x (default 0.58)
+    p2y?:  number;   // bezier control point 2 y (default 1.0)
+    min:   number;   // output minimum (default 0)
+    max:   number;   // output maximum (default 1)
+}
+
+export const CURVE_OFF:    CurveSpec = { mode: 'off',    min: 0, max: 1 };
+export const CURVE_LINEAR: CurveSpec = { mode: 'linear', min: 0, max: 1 };
+
+// ── BrushDescriptor ───────────────────────────────────────────────────────────
 
 export interface BrushDescriptor {
+
     // ── Geometry ──────────────────────────────────────────────────────────────
     /** Base size as fraction of canvas logical width (0.001..1.0) */
     size:            number;
@@ -22,101 +40,299 @@ export interface BrushDescriptor {
     spacing:         number;
     /** Hardness: 0 = fully soft (gaussian falloff), 1 = hard edge */
     hardness:        number;
-    /** Fixed stamp rotation in degrees (0..360). 0 = auto from tilt */
+    /** Fixed stamp rotation in degrees (0..360) */
     angle:           number;
-    /** Ellipse minor/major axis ratio (0..1). 1 = circle */
+    /** Ellipse minor/major axis ratio (0..1). 1 = perfect circle */
     roundness:       number;
 
-    // ── Opacity ───────────────────────────────────────────────────────────────
+    // ── Size dynamics ─────────────────────────────────────────────────────────
+    /** Minimum size multiplier after all dynamics (0..1) */
+    sizeMin:              number;
+    /** Maximum size multiplier after all dynamics (0..1) */
+    sizeMax:              number;
+    /** Backward-compat: linear pressure→size strength (0=none, 1=full).
+     *  Active only when sizePressureCurve.mode === 'off'. */
+    pressureSize:         number;
+    /** Curve: pressure → size multiplier (overrides pressureSize when mode ≠ 'off') */
+    sizePressureCurve:    CurveSpec;
+    /** Curve: tilt magnitude (0..90° normalised to 0..1) → size multiplier */
+    sizeTiltCurve:        CurveSpec;
+    /** Curve: stroke speed (normalised, max ~2 canvas-width units/sec) → size multiplier */
+    sizeSpeedCurve:       CurveSpec;
+
+    // ── Opacity dynamics ──────────────────────────────────────────────────────
     /** Base opacity of each stamp (0..1) */
-    opacity:         number;
-    /** Flow: fraction of opacity applied per stamp when building up (0..1) */
-    flow:            number;
+    opacity:              number;
+    /** Minimum opacity multiplier after all dynamics */
+    opacityMin:           number;
+    /** Maximum opacity multiplier after all dynamics */
+    opacityMax:           number;
+    /** Backward-compat: linear pressure→opacity strength. Active when opacityPressureCurve.mode==='off'. */
+    pressureOpacity:      number;
+    /** Curve: pressure → opacity multiplier */
+    opacityPressureCurve: CurveSpec;
+    /** Curve: speed → opacity multiplier */
+    opacitySpeedCurve:    CurveSpec;
 
-    // ── Pressure dynamics ─────────────────────────────────────────────────────
-    /** How much pressure affects size (0 = none, 1 = full range) */
-    pressureSize:    number;
-    /** How much pressure affects opacity (0 = none, 1 = full range) */
-    pressureOpacity: number;
-
-    // ── Tilt dynamics ─────────────────────────────────────────────────────────
-    /** Whether tilt controls stamp angle (azimuth → rotation) */
-    tiltAngle:       boolean;
-    /** Whether tilt controls stamp shape (tilt magnitude → aspect ratio) */
-    tiltShape:       boolean;
-
-    // ── Jitter / randomness ───────────────────────────────────────────────────
-    /** Size randomness per stamp (0..1) */
-    sizeJitter:      number;
-    /** Opacity randomness per stamp (0..1) */
-    opacityJitter:   number;
-    /** Hue shift randomness per stamp in degrees (0..180) */
-    hueJitter:       number;
-    /** Saturation randomness per stamp (0..1) */
-    satJitter:       number;
-    /** Value randomness per stamp (0..1) */
-    valJitter:       number;
-    /** Angle randomness per stamp in degrees (0..180) */
-    angleJitter:     number;
+    // ── Flow dynamics ─────────────────────────────────────────────────────────
+    /** Base flow / density per stamp (0..1) */
+    flow:                 number;
+    /** Minimum flow multiplier */
+    flowMin:              number;
+    /** Maximum flow multiplier */
+    flowMax:              number;
+    /** Curve: pressure → flow multiplier */
+    flowPressureCurve:    CurveSpec;
 
     // ── Tip ───────────────────────────────────────────────────────────────────
-    /** Atlas index for texture tip. -1 = procedural circular/elliptical tip */
-    tipIndex:        number;
+    /** Atlas index for image tip. -1 = procedural soft/hard circle */
+    tipIndex:             number;
+
+    // ── Rotation ──────────────────────────────────────────────────────────────
+    /** Stamp angle follows stroke direction (tangent) */
+    followStroke:         boolean;
+    /** 0..1 — how much tilt azimuth contributes to stamp angle */
+    tiltAngleInfluence:   number;
+    /** Backward-compat: tiltAngle bool — enable full tilt-to-angle mapping */
+    tiltAngle:            boolean;
+    /** Per-stamp angle randomness in degrees (0..180) */
+    angleJitter:          number;
+
+    // ── Roundness dynamics ────────────────────────────────────────────────────
+    /** Minimum per-stamp roundness (clamp floor, prevents complete collapse) */
+    roundnessMin:         number;
+    /** Curve: tilt magnitude (0..1 norm) → roundness multiplier */
+    roundnessTiltCurve:   CurveSpec;
+    /** Curve: pressure → roundness multiplier */
+    roundnessPressureCurve: CurveSpec;
+    /** Backward-compat: tilt squishes roundness proportionally */
+    tiltShape:            boolean;
+
+    // ── Scatter ───────────────────────────────────────────────────────────────
+    /** X position scatter half-range (normalised canvas units) */
+    scatterX:             number;
+    /** Y position scatter half-range (normalised canvas units) */
+    scatterY:             number;
+    /** Curve: pressure → scatter multiplier */
+    scatterPressureCurve: CurveSpec;
+    /** Stamps emitted per spacing step (1..16) */
+    stampCount:           number;
+    /** Random ±N variation in stamp count (0 = exact) */
+    stampCountJitter:     number;
 
     // ── Color ─────────────────────────────────────────────────────────────────
-    /** Base stroke color [r, g, b, a] normalized 0..1 */
-    color:           [number, number, number, number];
+    /** Base (foreground) color [r, g, b, a] normalised 0..1 */
+    color:                [number, number, number, number];
+    /** Secondary (background) color for fg/bg mix */
+    color2:               [number, number, number, number];
+    /** Mix slider: 0 = fg only, 1 = bg (color2) only */
+    colorFgBgMix:         number;
+    /** Curve: pressure → color mix multiplier */
+    colorMixPressureCurve: CurveSpec;
+
+    // ── Color jitter — per tip ────────────────────────────────────────────────
+    hueJitter:            number;   // 0..180 degrees
+    satJitter:            number;   // 0..1
+    valJitter:            number;   // 0..1
+    sizeJitter:           number;   // 0..1
+    opacityJitter:        number;   // 0..1
+
+    // ── Color jitter — per stroke ─────────────────────────────────────────────
+    hueJitterPerStroke:   number;   // 0..180 degrees (applied once at stroke start)
+    satJitterPerStroke:   number;   // 0..1
+    valJitterPerStroke:   number;   // 0..1
+
+    // ── Tapering ──────────────────────────────────────────────────────────────
+    /** Start taper length in normalised canvas units (0 = off) */
+    taperStart:           number;
+    /** End taper length in normalised canvas units (0 = off) */
+    taperEnd:             number;
+    /** Apply taper to size as well */
+    taperSizeLink:        boolean;
+    /** Apply taper to opacity (almost always true when taper is set) */
+    taperOpacityLink:     boolean;
+
+    // ── Stabilization ─────────────────────────────────────────────────────────
+    /** Pull-string length (0 = off, >0 = string must be pulled past this distance) */
+    pullStringLength:     number;
+    /** When true, string slowly drifts toward pointer even inside pull radius */
+    catchUpEnabled:       boolean;
+
+    // ── Grain / texture ───────────────────────────────────────────────────────
+    /** Grain texture index in the library (-1 = no grain) */
+    grainIndex:           number;
+    /** Grain texture scale multiplier (0.1..4.0) */
+    grainScale:           number;
+    /** Grain texture rotation in degrees */
+    grainRotation:        number;
+    /** true = grain fixed to canvas UV; false = grain moves with stroke */
+    grainStatic:          boolean;
+    /** Overall grain depth / strength (0..1) */
+    grainDepth:           number;
+    /** Grain contrast multiplier (0.5..2.0) */
+    grainContrast:        number;
+    /** Grain brightness offset (−0.5..0.5) */
+    grainBrightness:      number;
+    /** How grain texture blends with brush color */
+    grainBlendMode:       GrainBlendMode;
+    /** Curve: pressure → per-stamp grain depth scale */
+    grainDepthCurve:      CurveSpec;
+
+    // ── Wet mixing ────────────────────────────────────────────────────────────
+    /** Dilution: 0 = opaque/dry, 1 = maximum wet blending */
+    wetness:              number;
+    /** Paint charge: how much paint is loaded (0..1, depletes over stroke) */
+    paintLoad:            number;
+    /** Curve: pressure → wetness multiplier */
+    wetnessPressureCurve: CurveSpec;
+
+    // ── Smoothing ─────────────────────────────────────────────────────────────
+    /** Input-point smoothing strength (0 = raw, 1 = maximum). Exponential moving
+     *  average applied to each incoming pointer position before stamping. */
+    smoothing:            number;
+
+    // ── Jitter seed ───────────────────────────────────────────────────────────
+    /** When true, the scatter/jitter PRNG uses a fixed seed every stroke,
+     *  producing the same scatter pattern each time you draw. */
+    jitterSeedLock:       boolean;
+    /** Seed value used when jitterSeedLock is true (0..999). */
+    jitterSeed:           number;
+
+    // ── Bristle tip ───────────────────────────────────────────────────────────
+    /** Number of bristle fibers (0 = off, 4..32 = bristle brush mode).
+     *  In bristle mode, each stamp position emits N micro-stamps in a cluster.
+     *  stampCount / scatter are ignored when bristleCount > 0. */
+    bristleCount:         number;
+    /** Cluster spread radius as a multiple of the stamp half-size (0.1..2.0) */
+    bristleLength:        number;
+
+    // ── Wet edge ──────────────────────────────────────────────────────────────
+    /** 0..1 strength of the wet-edge accumulation effect.
+     *  Tracks per-stroke paint density and boosts opacity at stroke boundaries
+     *  to simulate watercolour pigment migration to the drying edge. */
+    wetEdge:              number;
 
     // ── Blend mode ────────────────────────────────────────────────────────────
-    blendMode:       BrushBlendMode;
+    blendMode:            BrushBlendMode;
 
     // ── Smudge ───────────────────────────────────────────────────────────────
-    /** Smudge amount (0 = no smudge, 1 = maximum smudge). Tool-specific. */
-    smudge:          number;
+    /** Smudge amount (0..1). Tool-specific, used by SmudgeTool via SmudgeRenderer. */
+    smudge:               number;
 }
 
-// ── Factory / presets ─────────────────────────────────────────────────────────
+// ── Factory / defaults ────────────────────────────────────────────────────────
 
 export function defaultBrushDescriptor(): BrushDescriptor {
     return {
         size:            0.05,
-        spacing:         0.35,
+        spacing:         0.10,
         hardness:        0.95,
         angle:           0,
         roundness:       1.0,
-        opacity:         1.0,
-        flow:            1.0,
-        pressureSize:    1.0,
-        pressureOpacity: 0.0,
-        tiltAngle:       false,
-        tiltShape:       true,
-        sizeJitter:      0,
-        opacityJitter:   0,
-        hueJitter:       0,
-        satJitter:       0,
-        valJitter:       0,
-        angleJitter:     0,
-        tipIndex:        -1,
-        color:           [0, 0, 0, 1],
-        blendMode:       'normal',
-        smudge:          0,
+
+        sizeMin:              0,
+        sizeMax:              1,
+        pressureSize:         0.0,
+        sizePressureCurve:    { ...CURVE_OFF },
+        sizeTiltCurve:        { ...CURVE_OFF },
+        sizeSpeedCurve:       { ...CURVE_OFF },
+
+        opacity:              1.0,
+        opacityMin:           0,
+        opacityMax:           1,
+        pressureOpacity:      0.0,
+        opacityPressureCurve: { ...CURVE_OFF },
+        opacitySpeedCurve:    { ...CURVE_OFF },
+
+        flow:                 1.0,
+        flowMin:              0,
+        flowMax:              1,
+        flowPressureCurve:    { ...CURVE_OFF },
+
+        tipIndex:             -1,
+
+        followStroke:         false,
+        tiltAngleInfluence:   0,
+        tiltAngle:            false,
+        angleJitter:          0,
+
+        roundnessMin:         0.05,
+        roundnessTiltCurve:   { ...CURVE_OFF },
+        roundnessPressureCurve: { ...CURVE_OFF },
+        tiltShape:            false,
+
+        scatterX:             0,
+        scatterY:             0,
+        scatterPressureCurve: { ...CURVE_OFF },
+        stampCount:           1,
+        stampCountJitter:     0,
+
+        color:                [0, 0, 0, 1],
+        color2:               [1, 1, 1, 1],
+        colorFgBgMix:         0,
+        colorMixPressureCurve: { ...CURVE_OFF },
+
+        hueJitter:            0,
+        satJitter:            0,
+        valJitter:            0,
+        sizeJitter:           0,
+        opacityJitter:        0,
+
+        hueJitterPerStroke:   0,
+        satJitterPerStroke:   0,
+        valJitterPerStroke:   0,
+
+        taperStart:           0,
+        taperEnd:             0,
+        taperSizeLink:        false,
+        taperOpacityLink:     true,
+
+        pullStringLength:     0,
+        catchUpEnabled:       false,
+
+        grainIndex:           -1,
+        grainScale:           1.0,
+        grainRotation:        0,
+        grainStatic:          true,
+        grainDepth:           0,
+        grainContrast:        1.0,
+        grainBrightness:      0,
+        grainBlendMode:       'multiply',
+        grainDepthCurve:      { ...CURVE_OFF },
+
+        wetness:              0,
+        paintLoad:            1,
+        wetnessPressureCurve: { ...CURVE_OFF },
+
+        smoothing:            0,
+        jitterSeedLock:       false,
+        jitterSeed:           42,
+
+        bristleCount:         0,
+        bristleLength:        0.8,
+
+        wetEdge:              0,
+
+        blendMode:            'normal',
+        smudge:               0,
     };
 }
 
 export function defaultEraserDescriptor(): BrushDescriptor {
     return {
         ...defaultBrushDescriptor(),
-        hardness:    0.95,
-        blendMode:   'erase',
-        color:       [1, 1, 1, 1],
+        hardness:  0.95,
+        blendMode: 'erase',
+        color:     [1, 1, 1, 1],
     };
 }
 
-/** Deep clone a descriptor (safe for postMessage structured clone). */
+/** Deep-clone a descriptor (safe for postMessage structured clone). */
 export function cloneDescriptor(d: BrushDescriptor): BrushDescriptor {
     return {
         ...d,
-        color: [...d.color] as [number, number, number, number],
+        color:  [...d.color]  as [number, number, number, number],
+        color2: [...d.color2] as [number, number, number, number],
     };
 }
 
@@ -128,6 +344,5 @@ export function descriptorToJSON(d: BrushDescriptor): string {
 
 export function descriptorFromJSON(json: string): BrushDescriptor {
     const parsed = JSON.parse(json) as Partial<BrushDescriptor>;
-    // Merge with defaults so old/partial preset files still work
     return { ...defaultBrushDescriptor(), ...parsed };
 }

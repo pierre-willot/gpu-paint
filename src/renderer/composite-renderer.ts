@@ -141,11 +141,12 @@ export class CompositeRenderer {
      * draw respects the scissor and leaves everything else untouched.
      */
     public render(
-        targetView:  GPUTextureView,
-        layers:      LayerState[],
-        overlayTex:  GPUTexture,
-        scissorRect: DirtyRect | null,
-        querySet?:   GPUQuerySet
+        targetView:     GPUTextureView,
+        layers:         LayerState[],
+        overlayTex:     GPUTexture,
+        scissorRect:    DirtyRect | null,
+        querySet?:      GPUQuerySet,
+        texOverride?:   { layerIndex: number; texture: GPUTexture } | null
     ) {
         // ── Write all uniforms before encoding GPU work ───────────────────────
         const visibleLayers: Array<{ layer: LayerState; slot: number }> = [];
@@ -204,6 +205,9 @@ export class CompositeRenderer {
 
         // ── Layer blend passes ────────────────────────────────────────────────
         for (const { layer, slot } of visibleLayers) {
+            const tex  = (texOverride && slot === texOverride.layerIndex)
+                ? texOverride.texture
+                : layer.texture;
             const pass = encoder.beginRenderPass({
                 colorAttachments: [{
                     view:    targetView,
@@ -216,7 +220,7 @@ export class CompositeRenderer {
                 scissorRect!.width, scissorRect!.height
             );
             pass.setPipeline(this.pipeline);
-            pass.setBindGroup(0, this.getBindGroup(layer.texture), [slot * this.uniformStride]);
+            pass.setBindGroup(0, this.getBindGroup(tex), [slot * this.uniformStride]);
             pass.draw(4);
             pass.end();
         }

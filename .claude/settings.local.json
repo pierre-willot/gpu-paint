@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit:*)",
+      "Bash(npm run:*)",
+      "Bash(git add:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx vite:*)",
+      "Bash(grep -rn \"cmd\\\\.stamps\\\\|cmd\\\\.pixels\\\\|cmd\\\\.blendMode\\\\|cmd\\\\.floatsPerStamp\\\\|cmd\\\\.selMode\\\\|\\\\.stampsBuffer\\\\|\\\\.pixelsBuffer\\\\|\\\\.blendMode\\\\b\\\\|\\\\.floatsPerStamp\" src/ --include=*.ts)",
+      "Bash(git push:*)"
+    ]
+  }
+}

@@ -83,10 +83,18 @@ export function bytesToPng(
 export async function downloadTexture(
     device:   GPUDevice,
     texture:  GPUTexture,
-    fileName: string = 'drawing.png'
+    fileName: string = 'drawing.png',
+    format?:  GPUTextureFormat
 ): Promise<void> {
     const pixels = await textureToBytes(device, texture);
-    const png    = await bytesToPng(pixels, texture.width, texture.height);
+    // On Windows/DX12 the default format is bgra8unorm — swap B and R so
+    // bytesToPng (which feeds RGBA to Canvas2D putImageData) gets correct colors.
+    if (format === 'bgra8unorm') {
+        for (let i = 0; i < pixels.length; i += 4) {
+            const b = pixels[i]; pixels[i] = pixels[i + 2]; pixels[i + 2] = b;
+        }
+    }
+    const png = await bytesToPng(pixels, texture.width, texture.height);
 
     const blob = new Blob([png], { type: 'image/png' });
     const link = document.createElement('a');

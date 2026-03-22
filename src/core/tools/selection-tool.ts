@@ -84,6 +84,19 @@ export class SelectionTool implements Tool {
     public screenToCanvas: ((cx: number, cy: number) => { x: number; y: number }) | null = null;
     public canvasToScreen: ((nx: number, ny: number) => { x: number; y: number }) | null = null;
 
+    /**
+     * Fired when a selection operation is committed.
+     * App.ts wires this to push a 'selection' command to history.
+     * The callback is responsible for actually calling the pipeline — the tool
+     * does NOT call pipeline.setRectSelection/setLassoSelection itself.
+     */
+    public onSelectionMade: ((op: {
+        operation: 'rect' | 'lasso';
+        selMode:   string;
+        x?:        number; y?: number; w?: number; h?: number;
+        points?:   number[];
+    }) => void) | null = null;
+
     constructor(private canvas: HTMLCanvasElement) {}
 
     // ── Public setters — called from UI popup ─────────────────────────────────
@@ -174,10 +187,16 @@ export class SelectionTool implements Tool {
             const y1 = Math.max(this.startY, ny);
 
             if (x1 - x0 > 0.001 && y1 - y0 > 0.001) {
+                // Apply immediately for visual feedback, then record to history
                 pipeline.setRectSelection(x0, y0, x1 - x0, y1 - y0, this.mode);
+                this.onSelectionMade?.({
+                    operation: 'rect', selMode: this.mode,
+                    x: x0, y: y0, w: x1 - x0, h: y1 - y0,
+                });
             } else {
                 // Tap with no drag → deselect
                 pipeline.deselect();
+                this.onSelectionMade?.({ operation: 'rect', selMode: 'replace', x: 0, y: 0, w: 0, h: 0 });
             }
         }
 
@@ -186,7 +205,12 @@ export class SelectionTool implements Tool {
             clearOverlay();
 
             if (this.lassoPoints.length >= 6) {
+                // Apply immediately, then record to history
                 pipeline.setLassoSelection(this.lassoPoints, this.mode);
+                this.onSelectionMade?.({
+                    operation: 'lasso', selMode: this.mode,
+                    points: this.lassoPoints.slice(),
+                });
             }
             this.lassoPoints = [];
         }
@@ -220,6 +244,10 @@ export class SelectionTool implements Tool {
         this.cancelPoly();
         if (pts.length >= 6) {
             pipeline.setLassoSelection(pts, this.mode);
+            this.onSelectionMade?.({
+                operation: 'lasso', selMode: this.mode,
+                points: pts,
+            });
         }
     }
 

@@ -432,10 +432,14 @@
 </div>
 
 <!-- ═══ TOOL SETTINGS PANEL ═══ -->
-<div class="float-panel brush-settings-panel" id="brushSettingsPanel" style="display:flex;left:320px;height:340px;">
+<div class="float-panel brush-settings-panel" id="brushSettingsPanel" style="display:flex;left:320px;height:400px;">
   <div class="panel-pill"></div>
   <div class="bs-panel-header">
     <div class="bs-tool-title" id="bs-tool-title">Brush</div>
+    <div class="bs-engine-tabs" id="bs-engine-tabs" style="display:none">
+      <button class="tab-btn active" id="bs-engine-a-tab" title="Engine A — full brush controls">A</button>
+      <button class="tab-btn"        id="bs-engine-b-tab" title="Engine B — focused brush controls">B</button>
+    </div>
     <button class="btn-ghost bs-close-btn" id="bsCloseBtn" title="Close">✕</button>
   </div>
   <canvas id="bs-stroke-preview" width="216" height="36" title="Live stroke preview — updates as you change settings"></canvas>
@@ -444,165 +448,376 @@
     <!-- ── Painting tools (brush / eraser / smudge) ── -->
     <div id="bs-painting-section">
 
-      <!-- Core: Opacity / Flow / Mix — always visible -->
-      <div class="bs-top-rows">
-        <div class="bs-row" title="Overall transparency of each stamp (0=invisible, 100=fully opaque)"><span class="bs-label">Opacity</span><input type="range" class="slider bs-sl" id="bs-opacity" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-opacity-val" value="100%" maxlength="4"></div>
-        <div class="bs-row" id="bs-flow-row" title="Paint density per stamp. Low flow builds up paint gradually with overlapping strokes"><span class="bs-label">Flow</span><input type="range" class="slider bs-sl" id="bs-flow" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-flow-val" value="100%" maxlength="4"></div>
-        <div class="bs-row" id="bs-mix-row" title="Smudge strength — how far it drags existing paint"><span class="bs-label" id="bs-mix-label">Mix</span><input type="range" class="slider bs-sl" id="bs-mix" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-mix-val" value="0%" maxlength="4"></div>
+      <!-- ─── Core controls — always visible ──────────────────────────────── -->
+      <div class="bs-core-strip">
+        <div class="bs-row" title="Overall transparency of each stamp (0=invisible, 100=fully opaque)">
+          <span class="bs-label">Opacity</span><input type="range" class="slider bs-sl" id="bs-opacity" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-opacity-val" value="100%" maxlength="4">
+        </div>
+        <div class="bs-row" id="bs-flow-row" title="Paint density per stamp — low flow builds up color gradually with overlapping strokes">
+          <span class="bs-label">Flow</span><input type="range" class="slider bs-sl" id="bs-flow" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-flow-val" value="100%" maxlength="4">
+        </div>
+        <div class="bs-row" title="Edge softness — 0=smooth gaussian falloff, 100=sharp hard edge">
+          <span class="bs-label">Hardness</span><input type="range" class="slider bs-sl" id="bs-hardness" min="0" max="100" value="95"><input type="text" class="bs-val txt-field" id="bs-hardness-val" value="95%" maxlength="4">
+        </div>
+        <div class="bs-row" id="bs-mix-row" title="Smudge / mix — drags existing paint while painting. 0=off, 100=pure smudge">
+          <span class="bs-label" id="bs-mix-label">Mix</span><input type="range" class="slider bs-sl" id="bs-mix" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-mix-val" value="0%" maxlength="4">
+        </div>
       </div>
 
-      <!-- Shape -->
+      <!-- ─── Shape ────────────────────────────────────────────────────────── -->
       <details class="bs-card" open>
         <summary class="bs-card-hd">Shape</summary>
         <div class="bs-card-bd">
-          <div class="bs-row" title="Edge softness. 0=soft gaussian falloff, 100=sharp hard edge"><span class="bs-label">Hardness</span><input type="range" class="slider bs-sl" id="bs-hardness" min="0" max="100" value="95"><input type="text" class="bs-val txt-field" id="bs-hardness-val" value="95%" maxlength="4"></div>
-          <div class="bs-row" title="Gap between stamps as % of brush diameter. Low=continuous stroke, high=dotted"><span class="bs-label">Spacing</span><input type="range" class="slider bs-sl" id="bs-spacing" min="0.5" max="30" step="0.5" value="10"><input type="text" class="bs-val txt-field" id="bs-spacing-val" value="10%" maxlength="5"></div>
-          <div class="bs-row" title="Ellipse ratio. 100=circle, lower=elongated ellipse"><span class="bs-label">Roundness</span><input type="range" class="slider bs-sl" id="bs-roundness" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-roundness-val" value="100%" maxlength="4"></div>
-          <div class="bs-row" title="Fixed stamp rotation in degrees"><span class="bs-label">Angle</span><input type="range" class="slider bs-sl" id="bs-angle" min="0" max="360" value="0"><input type="text" class="bs-val txt-field" id="bs-angle-val" value="0°" maxlength="4"></div>
-          <div class="bs-row" title="Input smoothing reduces shakiness. 0=raw input, 100=maximum smoothing"><span class="bs-label">Smoothing</span><input type="range" class="slider bs-sl" id="bs-smoothing" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-smoothing-val" value="0%" maxlength="4"></div>
-          <div class="bs-chk-row" id="bs-follow-stroke-row" title="Stamp angle automatically rotates to follow the stroke direction"><span class="bs-chk-lbl">Follow Stroke</span><div class="toggle-switch" id="bs-follow-stroke" title="Stamp angle follows stroke direction"></div></div>
-          <div class="bs-sub-label" style="margin-top:6px">ROUNDNESS DYNAMICS</div>
-          <div id="bs-roundness-tilt-curve-container" style="margin:4px 0 2px"></div>
-          <div id="bs-roundness-pressure-curve-container" style="margin:4px 0 6px"></div>
-          <div class="bs-row" title="Minimum roundness when tilt squishes the ellipse"><span class="bs-label">Round Min</span><input type="range" class="slider bs-sl" id="bs-roundness-min" min="0" max="100" value="5"><input type="text" class="bs-val txt-field" id="bs-roundness-min-val" value="5%" maxlength="4"></div>
-          <div class="bs-row" title="How much pen tilt azimuth controls stamp rotation (0=none, 100=full)"><span class="bs-label">Tilt Angle</span><input type="range" class="slider bs-sl" id="bs-tilt-influence" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-tilt-influence-val" value="0%" maxlength="4"></div>
-          <div class="bs-chk-row" title="Pen tilt squishes the stamp roundness proportionally"><span class="bs-chk-lbl">Tilt Shape</span><div class="toggle-switch on" id="bs-tilt-shape" title="Tilt squishes roundness"></div></div>
-          <div class="bs-sub-label">Tip Texture</div>
-          <div class="bs-chk-row"><span class="bs-chk-lbl" id="bs-tip-name" style="font-size:9px;color:var(--text-3)">Procedural (none)</span><button class="btn-ghost" id="bs-tip-load-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px">Load</button></div>
-          <div class="bs-chk-row" id="bs-tip-clear-row" style="display:none"><button class="btn-ghost" id="bs-tip-clear-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px;width:100%">Clear tip texture</button></div>
+          <div class="bs-row" title="Gap between stamps as a fraction of brush diameter — low=smooth stroke, high=visible dots">
+            <span class="bs-label">Spacing</span><input type="range" class="slider bs-sl" id="bs-spacing" min="0.5" max="30" step="0.5" value="10"><input type="text" class="bs-val txt-field" id="bs-spacing-val" value="10%" maxlength="5">
+          </div>
+          <div class="bs-row" title="Input smoothing — reduces shakiness. 0=raw input, 100=maximum lag/smoothing">
+            <span class="bs-label">Smoothing</span><input type="range" class="slider bs-sl" id="bs-smoothing" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-smoothing-val" value="0%" maxlength="4">
+          </div>
+          <div class="bs-row" title="Ellipse ratio — 100=perfect circle, lower values produce an elongated ellipse">
+            <span class="bs-label">Roundness</span><input type="range" class="slider bs-sl" id="bs-roundness" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-roundness-val" value="100%" maxlength="4">
+          </div>
+          <div class="bs-row" title="Fixed stamp rotation in degrees (use Follow Stroke for direction-based rotation)">
+            <span class="bs-label">Angle</span><input type="range" class="slider bs-sl" id="bs-angle" min="0" max="360" value="0"><input type="text" class="bs-val txt-field" id="bs-angle-val" value="0°" maxlength="4">
+          </div>
+          <div class="bs-chk-row" id="bs-follow-stroke-row" title="Stamp angle automatically rotates to follow the stroke direction">
+            <span class="bs-chk-lbl">Follow stroke direction</span><div class="toggle-switch" id="bs-follow-stroke"></div>
+          </div>
+          <div class="bs-sub-label" style="margin-top:6px">TIP TEXTURE</div>
+          <div class="bs-chk-row">
+            <span class="bs-chk-lbl" id="bs-tip-name" style="font-size:9px;color:var(--text-3)">Procedural (none)</span>
+            <button class="btn-ghost" id="bs-tip-load-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px">Load</button>
+          </div>
+          <canvas id="bs-tip-thumb" class="tex-thumb" width="48" height="48" style="display:none"></canvas>
+          <div class="bs-chk-row" id="bs-tip-clear-row" style="display:none">
+            <button class="btn-ghost" id="bs-tip-clear-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px;width:100%">Clear tip texture</button>
+          </div>
         </div>
       </details>
 
-      <!-- Dynamics -->
+      <!-- ─── Dynamics ─────────────────────────────────────────────────────── -->
       <details class="bs-card" id="bs-pressure-section" open>
         <summary class="bs-card-hd">Dynamics</summary>
         <div class="bs-card-bd">
-          <div class="bs-sub-label" style="margin-top:4px">SIZE DYNAMICS</div>
-          <div id="bs-size-curve-container" style="margin:4px 0 2px"></div>
-          <div id="bs-size-tilt-curve-container" style="margin:4px 0 2px"></div>
-          <div id="bs-size-speed-curve-container" style="margin:4px 0 6px"></div>
-          <div class="bs-row" title="Linear pressure→size sensitivity (overridden by SIZE DYNAMICS curve when active)"><span class="bs-label">Size</span><input type="range" class="slider bs-sl" id="bs-pres-size" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-pres-size-val" value="0%" maxlength="4"></div>
-          <div class="bs-sub-label" style="margin-top:6px">OPACITY DYNAMICS</div>
-          <div id="bs-opacity-curve-container" style="margin:4px 0 2px"></div>
-          <div id="bs-opacity-speed-curve-container" style="margin:4px 0 6px"></div>
-          <div class="bs-row" title="Linear pressure→opacity sensitivity (overridden by OPACITY DYNAMICS curve when active)"><span class="bs-label">Opacity</span><input type="range" class="slider bs-sl" id="bs-pres-opac" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-pres-opac-val" value="0%" maxlength="4"></div>
-          <div class="bs-sub-label" style="margin-top:6px">FLOW DYNAMICS</div>
-          <div id="bs-flow-curve-container" style="margin:4px 0 6px"></div>
-          <div class="bs-row" title="Linear pressure→flow sensitivity (overridden by FLOW DYNAMICS curve when active)"><span class="bs-label">Flow</span><input type="range" class="slider bs-sl" id="bs-pres-flow" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-pres-flow-val" value="0%" maxlength="4"></div>
-          <div class="bs-sub-label">Size Range</div>
-          <div class="bs-row" title="Minimum size multiplier after all dynamics — floor for small pressure"><span class="bs-label">Size Min</span><input type="range" class="slider bs-sl" id="bs-size-min" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-size-min-val" value="0%" maxlength="4"></div>
-          <div class="bs-row" title="Maximum size multiplier — caps the size at light pressure"><span class="bs-label">Size Max</span><input type="range" class="slider bs-sl" id="bs-size-max" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-size-max-val" value="100%" maxlength="4"></div>
-          <div class="bs-sub-label">Opacity Range</div>
-          <div class="bs-row" title="Minimum opacity after all dynamics"><span class="bs-label">Opac Min</span><input type="range" class="slider bs-sl" id="bs-opac-min" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-opac-min-val" value="0%" maxlength="4"></div>
-          <div class="bs-row" title="Maximum opacity after all dynamics"><span class="bs-label">Opac Max</span><input type="range" class="slider bs-sl" id="bs-opac-max" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-opac-max-val" value="100%" maxlength="4"></div>
+          <div class="bs-dyn-row">
+            <span class="bs-dyn-lbl">Size</span>
+            <input type="range" class="slider bs-dyn-sl" id="bs-dyn-size-sl" min="0" max="100" value="0">
+            <input type="text" class="bs-val txt-field" id="bs-dyn-size-vl" value="0%" maxlength="4" readonly>
+            <select class="bs-dyn-sel" id="bs-dyn-size-sel">
+              <option value="none">None</option>
+              <option value="pressure">Pressure</option>
+              <option value="velocity">Velocity</option>
+              <option value="tilt">Tilt</option>
+              <option value="random">Random</option>
+            </select>
+            <button class="bs-curve-icon grayed" id="bs-dyn-size-btn" title="Edit response curve">⌇</button>
+          </div>
+          <div class="bs-dyn-row">
+            <span class="bs-dyn-lbl">Opacity</span>
+            <input type="range" class="slider bs-dyn-sl" id="bs-dyn-opac-sl" min="0" max="100" value="0">
+            <input type="text" class="bs-val txt-field" id="bs-dyn-opac-vl" value="0%" maxlength="4" readonly>
+            <select class="bs-dyn-sel" id="bs-dyn-opac-sel">
+              <option value="none">None</option>
+              <option value="pressure">Pressure</option>
+              <option value="velocity">Velocity</option>
+              <option value="random">Random</option>
+            </select>
+            <button class="bs-curve-icon grayed" id="bs-dyn-opac-btn" title="Edit response curve">⌇</button>
+          </div>
+          <div class="bs-dyn-row">
+            <span class="bs-dyn-lbl">Flow</span>
+            <input type="range" class="slider bs-dyn-sl" id="bs-dyn-flow-sl" min="0" max="100" value="0">
+            <input type="text" class="bs-val txt-field" id="bs-dyn-flow-vl" value="0%" maxlength="4" readonly>
+            <select class="bs-dyn-sel" id="bs-dyn-flow-sel">
+              <option value="none">None</option>
+              <option value="pressure">Pressure</option>
+            </select>
+            <button class="bs-curve-icon grayed" id="bs-dyn-flow-btn" title="Edit response curve">⌇</button>
+          </div>
         </div>
       </details>
 
-      <!-- Scatter -->
+      <!-- ─── Tilt — closed by default ─────────────────────────────────────── -->
+      <details class="bs-card">
+        <summary class="bs-card-hd">Tilt</summary>
+        <div class="bs-card-bd">
+          <div class="bs-chk-row" title="Pen tilt flattens the stamp into an ellipse — heavy tilt = stronger squish">
+            <span class="bs-chk-lbl">Tilt flattens shape</span><div class="toggle-switch" id="bs-tilt-shape"></div>
+          </div>
+          <div class="bs-row" title="How much pen tilt azimuth (compass direction) rotates the stamp angle (0=none, 100=full)">
+            <span class="bs-label">Tilt angle</span><input type="range" class="slider bs-sl" id="bs-tilt-influence" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-tilt-influence-val" value="0%" maxlength="4">
+          </div>
+          <div class="bs-sub-label" style="margin-top:6px">ROUNDNESS</div>
+          <div id="bs-roundness-tilt-curve-container" style="margin:2px 0"></div>
+          <div id="bs-roundness-pressure-curve-container" style="margin:2px 0 4px"></div>
+          <div class="bs-row" title="Minimum roundness — floor that prevents the stamp from collapsing to a flat line">
+            <span class="bs-label">Min round</span><input type="range" class="slider bs-sl" id="bs-roundness-min" min="0" max="100" value="5"><input type="text" class="bs-val txt-field" id="bs-roundness-min-val" value="5%" maxlength="4">
+          </div>
+        </div>
+      </details>
+
+      <!-- ─── Scatter — closed by default ──────────────────────────────────── -->
       <details class="bs-card" id="bs-scatter-section">
         <summary class="bs-card-hd">Scatter</summary>
         <div class="bs-card-bd">
-          <div class="bs-row" title="Random size variation per stamp (0=uniform, 100=fully random)"><span class="bs-label">Size</span><input type="range" class="slider bs-sl" id="bs-size-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-size-jitter-val" value="0%" maxlength="4"></div>
-          <div class="bs-row" title="Random opacity variation per stamp"><span class="bs-label">Opacity</span><input type="range" class="slider bs-sl" id="bs-opac-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-opac-jitter-val" value="0%" maxlength="4"></div>
-          <div class="bs-row" title="Random stamp angle jitter in degrees per stamp"><span class="bs-label">Ang Jit</span><input type="range" class="slider bs-sl" id="bs-angle-jitter" min="0" max="180" value="0"><input type="text" class="bs-val txt-field" id="bs-angle-jitter-val" value="0°" maxlength="4"></div>
-          <div id="bs-scatter-pressure-curve-container" style="margin:4px 0 6px"></div>
-          <div class="bs-row" title="Position scatter range on the X axis (canvas units)"><span class="bs-label">Scat X</span><input type="range" class="slider bs-sl" id="bs-scatter-x" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-scatter-x-val" value="0%" maxlength="4"></div>
-          <div class="bs-row" title="Position scatter range on the Y axis (canvas units)"><span class="bs-label">Scat Y</span><input type="range" class="slider bs-sl" id="bs-scatter-y" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-scatter-y-val" value="0%" maxlength="4"></div>
-          <div class="bs-row" title="Number of stamps emitted per spacing step"><span class="bs-label">Count</span><input type="range" class="slider bs-sl" id="bs-stamp-count" min="1" max="16" value="1"><input type="text" class="bs-val txt-field" id="bs-stamp-count-val" value="1" maxlength="2"></div>
-          <div class="bs-row" title="Random ±N variation in stamp count per step"><span class="bs-label">Cnt Jitter</span><input type="range" class="slider bs-sl" id="bs-stamp-count-jitter" min="0" max="8" value="0"><input type="text" class="bs-val txt-field" id="bs-stamp-count-jitter-val" value="0" maxlength="2"></div>
-          <div class="bs-chk-row" title="Lock jitter seed: same scatter/color pattern every stroke (useful for textured fills)"><span class="bs-chk-lbl">Seed Lock</span><div class="toggle-switch" id="bs-jitter-seed-lock"></div></div>
+          <div class="bs-sub-label">POSITION</div>
+          <div class="bs-row" title="Random position offset on the X axis (canvas units)">
+            <span class="bs-label">Scatter X</span><input type="range" class="slider bs-sl" id="bs-scatter-x" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-scatter-x-val" value="0%" maxlength="4">
+          </div>
+          <div class="bs-row" title="Random position offset on the Y axis (canvas units)">
+            <span class="bs-label">Scatter Y</span><input type="range" class="slider bs-sl" id="bs-scatter-y" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-scatter-y-val" value="0%" maxlength="4">
+          </div>
+          <div id="bs-scatter-pressure-curve-container" style="margin:2px 0 4px"></div>
+          <div class="bs-sub-label" style="margin-top:4px">PER STAMP</div>
+          <div class="bs-row" title="Random size variation per stamp (0=uniform, 100=fully random)">
+            <span class="bs-label">Size jitter</span><input type="range" class="slider bs-sl" id="bs-size-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-size-jitter-val" value="0%" maxlength="4">
+          </div>
+          <div class="bs-row" title="Random opacity variation per stamp">
+            <span class="bs-label">Opac jitter</span><input type="range" class="slider bs-sl" id="bs-opac-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-opac-jitter-val" value="0%" maxlength="4">
+          </div>
+          <div class="bs-row" title="Random stamp angle variation per stamp (degrees)">
+            <span class="bs-label">Ang jitter</span><input type="range" class="slider bs-sl" id="bs-angle-jitter" min="0" max="180" value="0"><input type="text" class="bs-val txt-field" id="bs-angle-jitter-val" value="0°" maxlength="4">
+          </div>
+          <div class="bs-sub-label" style="margin-top:4px">STAMP COUNT</div>
+          <div class="bs-row" title="Number of stamps emitted at each spacing step (1=single, 16=dense burst)">
+            <span class="bs-label">Count</span><input type="range" class="slider bs-sl" id="bs-stamp-count" min="1" max="16" value="1"><input type="text" class="bs-val txt-field" id="bs-stamp-count-val" value="1" maxlength="2">
+          </div>
+          <div class="bs-row" title="Random variation in stamp count per step">
+            <span class="bs-label">Count ±</span><input type="range" class="slider bs-sl" id="bs-stamp-count-jitter" min="0" max="8" value="0"><input type="text" class="bs-val txt-field" id="bs-stamp-count-jitter-val" value="0" maxlength="2">
+          </div>
+          <div class="bs-chk-row" title="Use the same scatter and jitter pattern for every stroke — useful for textured brushes">
+            <span class="bs-chk-lbl">Same pattern every stroke</span><div class="toggle-switch" id="bs-jitter-seed-lock"></div>
+          </div>
         </div>
       </details>
 
-      <!-- ── Brush-only advanced sections ─────────────────────────────── -->
+      <!-- ── Brush-only sections ─────────────────────────────────────────────── -->
       <div id="bs-brush-adv" style="display:none">
 
+        <!-- ─── Color Dynamics ──────────────────────────────────────────────── -->
         <details class="bs-card">
           <summary class="bs-card-hd">Color Dynamics</summary>
           <div class="bs-card-bd">
-            <div class="bs-sub-label">Per Tip</div>
-            <div class="bs-row" title="Random hue shift per stamp (degrees)"><span class="bs-label">Hue Jit</span><input type="range" class="slider bs-sl" id="bs-hue-jitter" min="0" max="180" value="0"><input type="text" class="bs-val txt-field" id="bs-hue-jitter-val" value="0°" maxlength="4"></div>
-            <div class="bs-row" title="Random saturation shift per stamp"><span class="bs-label">Sat Jit</span><input type="range" class="slider bs-sl" id="bs-sat-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-sat-jitter-val" value="0%" maxlength="4"></div>
-            <div class="bs-row" title="Random brightness shift per stamp"><span class="bs-label">Val Jit</span><input type="range" class="slider bs-sl" id="bs-val-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-val-jitter-val" value="0%" maxlength="4"></div>
-            <div class="bs-row" title="Mix between foreground (left) and secondary color (right)"><span class="bs-label">Fg/Bg</span><input type="range" class="slider bs-sl" id="bs-fg-bg-mix" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-fg-bg-mix-val" value="0%" maxlength="4"></div>
-            <div id="bs-color-mix-curve-container" style="margin:4px 0 6px"></div>
-            <div class="bs-sub-label">Per Stroke</div>
-            <div class="bs-row" title="Random hue shift applied once at stroke start, constant for the whole stroke"><span class="bs-label">Hue Jit</span><input type="range" class="slider bs-sl" id="bs-hue-jitter-ps" min="0" max="180" value="0"><input type="text" class="bs-val txt-field" id="bs-hue-jitter-ps-val" value="0°" maxlength="4"></div>
-            <div class="bs-row" title="Same but for saturation/brightness"><span class="bs-label">Sat Jit</span><input type="range" class="slider bs-sl" id="bs-sat-jitter-ps" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-sat-jitter-ps-val" value="0%" maxlength="4"></div>
-            <div class="bs-row" title="Same but for saturation/brightness"><span class="bs-label">Val Jit</span><input type="range" class="slider bs-sl" id="bs-val-jitter-ps" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-val-jitter-ps-val" value="0%" maxlength="4"></div>
+            <div class="bs-sub-label">PER STAMP</div>
+            <div class="bs-row" title="Random hue shift per stamp in degrees (0=off, 180=random hue)">
+              <span class="bs-label">Hue jitter</span><input type="range" class="slider bs-sl" id="bs-hue-jitter" min="0" max="180" value="0"><input type="text" class="bs-val txt-field" id="bs-hue-jitter-val" value="0°" maxlength="4">
+            </div>
+            <div class="bs-row" title="Random saturation variation per stamp">
+              <span class="bs-label">Sat jitter</span><input type="range" class="slider bs-sl" id="bs-sat-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-sat-jitter-val" value="0%" maxlength="4">
+            </div>
+            <div class="bs-row" title="Random brightness variation per stamp">
+              <span class="bs-label">Val jitter</span><input type="range" class="slider bs-sl" id="bs-val-jitter" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-val-jitter-val" value="0%" maxlength="4">
+            </div>
+            <div class="bs-row" title="Mix between foreground (0) and secondary color (100)">
+              <span class="bs-label">Fg / Bg</span><input type="range" class="slider bs-sl" id="bs-fg-bg-mix" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-fg-bg-mix-val" value="0%" maxlength="4">
+            </div>
+            <div id="bs-color-mix-curve-container" style="margin:2px 0 4px"></div>
+            <div class="bs-sub-label" style="margin-top:4px">PER STROKE</div>
+            <div class="bs-row" title="Hue shift applied once at stroke start — stays constant throughout the stroke">
+              <span class="bs-label">Hue jitter</span><input type="range" class="slider bs-sl" id="bs-hue-jitter-ps" min="0" max="180" value="0"><input type="text" class="bs-val txt-field" id="bs-hue-jitter-ps-val" value="0°" maxlength="4">
+            </div>
+            <div class="bs-row" title="Saturation shift applied once at stroke start">
+              <span class="bs-label">Sat jitter</span><input type="range" class="slider bs-sl" id="bs-sat-jitter-ps" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-sat-jitter-ps-val" value="0%" maxlength="4">
+            </div>
+            <div class="bs-row" title="Brightness shift applied once at stroke start">
+              <span class="bs-label">Val jitter</span><input type="range" class="slider bs-sl" id="bs-val-jitter-ps" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-val-jitter-ps-val" value="0%" maxlength="4">
+            </div>
           </div>
         </details>
 
-        <details class="bs-card">
-          <summary class="bs-card-hd">Tapering</summary>
-          <div class="bs-card-bd">
-            <div class="bs-row" title="Fade-in distance at stroke start (canvas units, 0=off)"><span class="bs-label">Start</span><input type="range" class="slider bs-sl" id="bs-taper-start" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-taper-start-val" value="0%" maxlength="4"></div>
-            <div class="bs-row" title="Fade-out distance at stroke end (canvas units, 0=off)"><span class="bs-label">End</span><input type="range" class="slider bs-sl" id="bs-taper-end" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-taper-end-val" value="0%" maxlength="4"></div>
-            <div class="bs-chk-row" title="Apply taper to size as well as opacity"><span class="bs-chk-lbl">Size Link</span><div class="toggle-switch" id="bs-taper-size" title="Apply taper to size"></div></div>
-            <div class="bs-chk-row" title="Apply taper to opacity (recommended on)"><span class="bs-chk-lbl">Opacity Link</span><div class="toggle-switch on" id="bs-taper-opac" title="Apply taper to opacity"></div></div>
-          </div>
-        </details>
-
-        <details class="bs-card">
-          <summary class="bs-card-hd">Stabilization</summary>
-          <div class="bs-card-bd">
-            <div class="bs-row" title="Pull-string length — higher values add more lag but smoother curves (0=off)"><span class="bs-label">Pull Str</span><input type="range" class="slider bs-sl" id="bs-pull-string" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-pull-string-val" value="0%" maxlength="4"></div>
-            <div class="bs-chk-row" title="String slowly drifts toward pointer even when inside the pull radius"><span class="bs-chk-lbl">Catch Up</span><div class="toggle-switch" id="bs-catch-up" title="String slowly catches up to pointer"></div></div>
-          </div>
-        </details>
-
-        <details class="bs-card">
-          <summary class="bs-card-hd">Bristle</summary>
-          <div class="bs-card-bd">
-            <div class="bs-row" title="Number of bristle fibers. 0=off. 6-24=fan/bristle brush feel"><span class="bs-label">Count</span><input type="range" class="slider bs-sl" id="bs-bristle-count" min="0" max="32" step="1" value="0"><input type="text" class="bs-val txt-field" id="bs-bristle-count-val" value="0" maxlength="3"></div>
-            <div class="bs-row" title="Fiber spread radius as a multiple of brush size (0.1=tight cluster, 2.0=wide fan)"><span class="bs-label">Length</span><input type="range" class="slider bs-sl" id="bs-bristle-length" min="10" max="200" value="80"><input type="text" class="bs-val txt-field" id="bs-bristle-length-val" value="0.8" maxlength="4"></div>
-          </div>
-        </details>
-
-        <details class="bs-card">
-          <summary class="bs-card-hd">Wet Mixing</summary>
-          <div class="bs-card-bd">
-            <div class="bs-row" title="Canvas color pickup strength. Higher=more of the existing paint blends into the brush color"><span class="bs-label">Wetness</span><input type="range" class="slider bs-sl" id="bs-wetness" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-wetness-val" value="0%" maxlength="4"></div>
-            <div class="bs-row" title="How much paint is loaded per stroke. Lower values cause the brush to fade out over long strokes"><span class="bs-label">Pd Load</span><input type="range" class="slider bs-sl" id="bs-paint-load" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-paint-load-val" value="100%" maxlength="4"></div>
-            <div class="bs-row" title="Watercolor edge effect: pigment accumulates at stroke boundaries, darkening the edges"><span class="bs-label">Wet Edge</span><input type="range" class="slider bs-sl" id="bs-wet-edge" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-wet-edge-val" value="0%" maxlength="4"></div>
-            <div class="bs-row" title="How much pressure modulates the wetness amount"><span class="bs-label">Wet Pres</span><input type="range" class="slider bs-sl" id="bs-wet-pressure" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-wet-pressure-val" value="0%" maxlength="4"></div>
-          </div>
-        </details>
-
+        <!-- ─── Texture ─────────────────────────────────────────────────────── -->
         <details class="bs-card">
           <summary class="bs-card-hd">Texture</summary>
           <div class="bs-card-bd">
-            <div class="bs-row" title="How strongly the texture modulates brush color (0=no texture, 100=full texture)"><span class="bs-label">Depth</span><input type="range" class="slider bs-sl" id="bs-grain-depth" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-grain-depth-val" value="0%" maxlength="4"></div>
-            <div id="bs-grain-depth-curve-container" style="margin:4px 0 6px"></div>
-            <div class="bs-row" title="Texture zoom — lower=zoomed in, higher=tiled"><span class="bs-label">Scale</span><input type="range" class="slider bs-sl" id="bs-grain-scale" min="10" max="400" value="100"><input type="text" class="bs-val txt-field" id="bs-grain-scale-val" value="1.0" maxlength="4"></div>
-            <div class="bs-row" title="Texture rotation angle in degrees"><span class="bs-label">Rotation</span><input type="range" class="slider bs-sl" id="bs-grain-rotation" min="0" max="360" value="0"><input type="text" class="bs-val txt-field" id="bs-grain-rotation-val" value="0°" maxlength="4"></div>
-            <div class="bs-row" title="Texture contrast multiplier (0.5=flat, 2.0=high contrast)"><span class="bs-label">Contrast</span><input type="range" class="slider bs-sl" id="bs-grain-contrast" min="50" max="300" value="100"><input type="text" class="bs-val txt-field" id="bs-grain-contrast-val" value="1.0" maxlength="4"></div>
-            <div class="bs-row" title="Texture brightness offset (negative=darken, positive=lighten)"><span class="bs-label">Bright</span><input type="range" class="slider bs-sl" id="bs-grain-brightness" min="-50" max="50" value="0"><input type="text" class="bs-val txt-field" id="bs-grain-brightness-val" value="0" maxlength="5"></div>
-            <div class="bs-chk-row" title="UV follows canvas coordinates (grain stays fixed while you paint) vs moving with the brush"><span class="bs-chk-lbl">Fixed to Canvas</span><div class="toggle-switch on" id="bs-grain-static" title="Grain UV fixed to canvas (vs moving with brush)"></div></div>
-            <div class="bs-sub-label">Blend</div>
-            <div class="sel-btn-row" id="bs-grain-blend-row">
-              <button class="btn-ghost sel-btn active" id="bs-grain-multiply">×</button>
-              <button class="btn-ghost sel-btn" id="bs-grain-screen">⊕</button>
-              <button class="btn-ghost sel-btn" id="bs-grain-overlay">◑</button>
-              <button class="btn-ghost sel-btn" id="bs-grain-normal">■</button>
+            <div class="bs-row" title="How strongly the texture modulates brush color (0=no texture, 100=full strength)">
+              <span class="bs-label">Depth</span><input type="range" class="slider bs-sl" id="bs-grain-depth" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-grain-depth-val" value="0%" maxlength="4">
             </div>
-            <div class="bs-sub-label">Texture Library</div>
+            <div id="bs-grain-depth-curve-container" style="margin:2px 0 4px"></div>
+            <div class="bs-row" title="Texture zoom — lower scale=larger grain, higher=tiled small grain">
+              <span class="bs-label">Scale</span><input type="range" class="slider bs-sl" id="bs-grain-scale" min="10" max="400" value="100"><input type="text" class="bs-val txt-field" id="bs-grain-scale-val" value="1.0" maxlength="4">
+            </div>
+            <div class="bs-row" title="Texture rotation angle in degrees">
+              <span class="bs-label">Rotation</span><input type="range" class="slider bs-sl" id="bs-grain-rotation" min="0" max="360" value="0"><input type="text" class="bs-val txt-field" id="bs-grain-rotation-val" value="0°" maxlength="4">
+            </div>
+            <div class="bs-row" title="Texture contrast (0.5=flat, 2.0=high contrast)">
+              <span class="bs-label">Contrast</span><input type="range" class="slider bs-sl" id="bs-grain-contrast" min="50" max="300" value="100"><input type="text" class="bs-val txt-field" id="bs-grain-contrast-val" value="1.0" maxlength="4">
+            </div>
+            <div class="bs-row" title="Texture brightness offset (negative=darken, positive=lighten)">
+              <span class="bs-label">Brightness</span><input type="range" class="slider bs-sl" id="bs-grain-brightness" min="-50" max="50" value="0"><input type="text" class="bs-val txt-field" id="bs-grain-brightness-val" value="0" maxlength="5">
+            </div>
+            <div class="bs-chk-row" title="When on, texture is fixed to canvas UV — it does not move with the brush stroke">
+              <span class="bs-chk-lbl">Fixed to canvas</span><div class="toggle-switch on" id="bs-grain-static"></div>
+            </div>
+            <div class="bs-sub-label" style="margin-top:4px">BLEND MODE</div>
+            <div class="sel-btn-row" id="bs-grain-blend-row">
+              <button class="btn-ghost sel-btn active" id="bs-grain-multiply" title="Multiply — darkens">×</button>
+              <button class="btn-ghost sel-btn" id="bs-grain-screen" title="Screen — lightens">⊕</button>
+              <button class="btn-ghost sel-btn" id="bs-grain-overlay" title="Overlay — contrast">◑</button>
+              <button class="btn-ghost sel-btn" id="bs-grain-normal" title="Normal — replaces">■</button>
+            </div>
+            <div class="bs-sub-label" style="margin-top:6px">TEXTURE LIBRARY</div>
             <div id="bs-grain-library" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:6px"></div>
-            <div class="bs-sub-label">Custom Texture</div>
-            <div class="bs-chk-row"><span class="bs-chk-lbl" id="bs-grain-tex-name" style="font-size:9px;color:var(--text-3)">Procedural noise</span><button class="btn-ghost" id="bs-grain-tex-load-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px">Load</button></div>
-            <div class="bs-chk-row" id="bs-grain-tex-clear-row" style="display:none"><button class="btn-ghost" id="bs-grain-tex-clear-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px;width:100%">Clear texture</button></div>
+            <div class="bs-sub-label">CUSTOM TEXTURE</div>
+            <div class="bs-chk-row">
+              <span class="bs-chk-lbl" id="bs-grain-tex-name" style="font-size:9px;color:var(--text-3)">Procedural noise</span>
+              <button class="btn-ghost" id="bs-grain-tex-load-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px">Load</button>
+            </div>
+            <canvas id="bs-grain-thumb" class="tex-thumb" width="48" height="48" style="display:none"></canvas>
+            <div class="bs-chk-row" id="bs-grain-tex-clear-row" style="display:none">
+              <button class="btn-ghost" id="bs-grain-tex-clear-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px;width:100%">Clear texture</button>
+            </div>
           </div>
         </details>
 
-      </div>
+        <!-- ─── Advanced ─────────────────────────────────────────────────────── -->
+        <details class="bs-card">
+          <summary class="bs-card-hd">Advanced</summary>
+          <div class="bs-card-bd">
+            <div class="bs-sub-label">TAPERING</div>
+            <div class="bs-row" title="Fade-in length at stroke start (0=off) — brush gradually appears from zero opacity">
+              <span class="bs-label">Start</span><input type="range" class="slider bs-sl" id="bs-taper-start" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-taper-start-val" value="0%" maxlength="4">
+            </div>
+            <div class="bs-row" title="Fade-out length at stroke end (0=off) — brush gradually disappears">
+              <span class="bs-label">End</span><input type="range" class="slider bs-sl" id="bs-taper-end" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-taper-end-val" value="0%" maxlength="4">
+            </div>
+            <div class="bs-chk-row" title="Apply the taper fade to brush size as well as opacity">
+              <span class="bs-chk-lbl">Taper size</span><div class="toggle-switch" id="bs-taper-size"></div>
+            </div>
+            <div class="bs-chk-row" title="Apply the taper fade to opacity (recommended on)">
+              <span class="bs-chk-lbl">Taper opacity</span><div class="toggle-switch on" id="bs-taper-opac"></div>
+            </div>
+            <div class="bs-sub-label" style="margin-top:8px">STABILIZATION</div>
+            <div class="bs-row" title="Pull-string length — stylus trails a virtual string, smoothing curves (0=off)">
+              <span class="bs-label">Pull str.</span><input type="range" class="slider bs-sl" id="bs-pull-string" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-pull-string-val" value="0%" maxlength="4">
+            </div>
+            <div class="bs-chk-row" title="String slowly drifts toward pointer even when inside the pull radius — prevents stalling">
+              <span class="bs-chk-lbl">Catch up</span><div class="toggle-switch" id="bs-catch-up"></div>
+            </div>
+            <div class="bs-sub-label" style="margin-top:8px">BRISTLE</div>
+            <div class="bs-row" title="Number of bristle fibers emitted per stamp. 0=off, 6–24=fan/bristle brush feel">
+              <span class="bs-label">Count</span><input type="range" class="slider bs-sl" id="bs-bristle-count" min="0" max="32" step="1" value="0"><input type="text" class="bs-val txt-field" id="bs-bristle-count-val" value="0" maxlength="3">
+            </div>
+            <div class="bs-row" title="Fiber spread radius as a multiple of brush size (0.1=tight cluster, 2.0=wide fan)">
+              <span class="bs-label">Spread</span><input type="range" class="slider bs-sl" id="bs-bristle-length" min="10" max="200" value="80"><input type="text" class="bs-val txt-field" id="bs-bristle-length-val" value="0.8" maxlength="4">
+            </div>
+            <div class="bs-sub-label" style="margin-top:8px">WET MIXING</div>
+            <div class="bs-row" title="Canvas color pickup — blends existing canvas paint into the brush color as you paint">
+              <span class="bs-label">Wetness</span><input type="range" class="slider bs-sl" id="bs-wetness" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-wetness-val" value="0%" maxlength="4">
+            </div>
+            <div class="bs-row" title="Paint load per stroke — lower values cause the brush to fade out over long strokes">
+              <span class="bs-label">Paint load</span><input type="range" class="slider bs-sl" id="bs-paint-load" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-paint-load-val" value="100%" maxlength="4">
+            </div>
+            <div class="bs-row" title="Watercolor edge effect — pigment accumulates at stroke boundaries (0=off)">
+              <span class="bs-label">Wet edge</span><input type="range" class="slider bs-sl" id="bs-wet-edge" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-wet-edge-val" value="0%" maxlength="4">
+            </div>
+            <div class="bs-row" title="How much pressure modulates the wetness amount">
+              <span class="bs-label">Wet pres.</span><input type="range" class="slider bs-sl" id="bs-wet-pressure" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-wet-pressure-val" value="0%" maxlength="4">
+            </div>
+          </div>
+        </details>
 
-      <!-- Pressure Curve -->
+      </div><!-- /#bs-brush-adv -->
+
+      <!-- ─── Pressure Curve ─────────────────────────────────────────────────── -->
       <details class="bs-card" open>
         <summary class="bs-card-hd">Pressure Curve</summary>
         <div class="bs-card-bd"><div id="pressureCurveContainer"></div></div>
       </details>
 
-    </div>
+    </div><!-- /#bs-engine-a (Engine A — ends here logically, Engine B below) -->
+
+    <!-- ═══ ENGINE B SECTION ════════════════════════════════════════════════ -->
+    <div id="bs-engine-b" style="display:none">
+
+      <!-- ─── Core controls ──────────────────────────────────────────────── -->
+      <div class="bs-core-strip">
+        <div class="bs-row" title="Overall transparency of each stamp (0=invisible, 100=fully opaque)">
+          <span class="bs-label">Opacity</span><input type="range" class="slider bs-sl" id="bs-b-opacity" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-b-opacity-val" value="100%" maxlength="4">
+        </div>
+        <div class="bs-row" title="Paint density per stamp — low density builds up color gradually with overlapping strokes">
+          <span class="bs-label">Density</span><input type="range" class="slider bs-sl" id="bs-b-flow" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-b-flow-val" value="100%" maxlength="4">
+        </div>
+        <div class="bs-row" title="Smudge / mix — drags existing paint while painting. 0=off, 100=pure smudge">
+          <span class="bs-label">Mix</span><input type="range" class="slider bs-sl" id="bs-b-mix" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-b-mix-val" value="0%" maxlength="4">
+        </div>
+      </div>
+
+      <!-- ─── Shape ──────────────────────────────────────────────────────── -->
+      <details class="bs-card" open>
+        <summary class="bs-card-hd">Shape</summary>
+        <div class="bs-card-bd">
+          <div class="bs-row" title="Edge softness — 0=smooth gaussian falloff, 100=sharp hard edge">
+            <span class="bs-label">Hardness</span><input type="range" class="slider bs-sl" id="bs-b-hardness" min="0" max="100" value="95"><input type="text" class="bs-val txt-field" id="bs-b-hardness-val" value="95%" maxlength="4">
+          </div>
+          <div class="bs-row" title="Gap between stamps as a fraction of brush diameter">
+            <span class="bs-label">Spacing</span><input type="range" class="slider bs-sl" id="bs-b-spacing" min="0.5" max="30" step="0.5" value="10"><input type="text" class="bs-val txt-field" id="bs-b-spacing-val" value="10%" maxlength="5">
+          </div>
+          <div class="bs-sub-label" style="margin-top:6px">PRIMARY TEXTURE</div>
+          <div class="bs-chk-row">
+            <span class="bs-chk-lbl" id="bs-b-tip-name" style="font-size:9px;color:var(--text-3)">Procedural (none)</span>
+            <button class="btn-ghost" id="bs-b-tip-load-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px">Load</button>
+          </div>
+          <canvas id="bs-b-tip-thumb" class="tex-thumb" width="48" height="48" style="display:none"></canvas>
+          <div class="bs-chk-row" id="bs-b-tip-clear-row" style="display:none">
+            <button class="btn-ghost" id="bs-b-tip-clear-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px;width:100%">Clear tip texture</button>
+          </div>
+        </div>
+      </details>
+
+      <!-- ─── Pressure ───────────────────────────────────────────────────── -->
+      <details class="bs-card" open>
+        <summary class="bs-card-hd">Pressure</summary>
+        <div class="bs-card-bd">
+          <div class="bs-row" title="How strongly pen pressure narrows the brush tip (0=no pressure effect, 100=full)">
+            <span class="bs-label">Size</span><input type="range" class="slider bs-sl" id="bs-b-pres-size" min="0" max="100" value="50"><input type="text" class="bs-val txt-field" id="bs-b-pres-size-val" value="50%" maxlength="4">
+          </div>
+        </div>
+      </details>
+
+      <!-- ─── Secondary Texture / Grain ─────────────────────────────────── -->
+      <details class="bs-card">
+        <summary class="bs-card-hd">Secondary Texture</summary>
+        <div class="bs-card-bd">
+          <div class="bs-row" title="How strongly the texture modulates brush color (0=no texture, 100=full strength)">
+            <span class="bs-label">Depth</span><input type="range" class="slider bs-sl" id="bs-b-grain-depth" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-b-grain-depth-val" value="0%" maxlength="4">
+          </div>
+          <div class="bs-row" title="Texture zoom — lower=larger grain, higher=tiled small grain">
+            <span class="bs-label">Scale</span><input type="range" class="slider bs-sl" id="bs-b-grain-scale" min="10" max="400" value="100"><input type="text" class="bs-val txt-field" id="bs-b-grain-scale-val" value="1.00" maxlength="4">
+          </div>
+          <div class="bs-row" title="Texture rotation angle in degrees">
+            <span class="bs-label">Rotation</span><input type="range" class="slider bs-sl" id="bs-b-grain-rotation" min="0" max="360" value="0"><input type="text" class="bs-val txt-field" id="bs-b-grain-rotation-val" value="0°" maxlength="4">
+          </div>
+          <div class="bs-chk-row" title="When on, texture is fixed to canvas UV — it does not move with the brush stroke">
+            <span class="bs-chk-lbl">Fixed to canvas</span><div class="toggle-switch on" id="bs-b-grain-static"></div>
+          </div>
+          <div class="bs-sub-label" style="margin-top:4px">BLEND MODE</div>
+          <div class="sel-btn-row">
+            <button class="btn-ghost sel-btn active" id="bs-b-grain-multiply" title="Multiply — darkens">×</button>
+            <button class="btn-ghost sel-btn" id="bs-b-grain-screen" title="Screen — lightens">⊕</button>
+            <button class="btn-ghost sel-btn" id="bs-b-grain-overlay" title="Overlay — contrast">◑</button>
+            <button class="btn-ghost sel-btn" id="bs-b-grain-normal" title="Normal — replaces">■</button>
+          </div>
+          <div class="bs-sub-label" style="margin-top:6px">TEXTURE</div>
+          <div class="bs-chk-row">
+            <span class="bs-chk-lbl" id="bs-b-grain-tex-name" style="font-size:9px;color:var(--text-3)">Procedural noise</span>
+            <button class="btn-ghost" id="bs-b-grain-tex-load-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px">Load</button>
+          </div>
+          <canvas id="bs-b-grain-thumb" class="tex-thumb" width="48" height="48" style="display:none"></canvas>
+          <div class="bs-chk-row" id="bs-b-grain-tex-clear-row" style="display:none">
+            <button class="btn-ghost" id="bs-b-grain-tex-clear-btn" style="font-size:9px;padding:2px 6px;height:20px;border-radius:5px;width:100%">Clear texture</button>
+          </div>
+        </div>
+      </details>
+
+      <!-- ─── Pressure Curve ─────────────────────────────────────────────── -->
+      <details class="bs-card" open>
+        <summary class="bs-card-hd">Pressure Curve</summary>
+        <div class="bs-card-bd"><div id="bs-b-pressure-curve-container"></div></div>
+      </details>
+
+    </div><!-- /#bs-engine-b -->
+
+    </div><!-- /#bs-painting-section -->
 
     <!-- ── Selection tool settings ── -->
     <div id="bs-selection-section" style="display:none">
@@ -758,6 +973,60 @@
     <button class="btn-ghost export-option-btn" id="export-png-btn"><span>PNG</span><span class="export-badge">Lossless · Alpha</span></button>
     <button class="btn-ghost export-option-btn" id="export-zip-btn"><span>Layers ZIP</span><span class="export-badge">All layers separate</span></button>
     <button class="btn-ghost export-option-btn" id="export-gpaint-btn"><span>.gpaint</span><span class="export-badge">Native format</span></button>
+  </div>
+</div>
+
+<!-- ═══ DYNAMICS CURVE POPUP ═══ -->
+<div class="bs-dyn-popup" id="bs-dyn-popup" style="display:none">
+  <div class="bs-dyn-popup-hd">
+    <span id="bs-dyn-popup-title">—</span>
+    <button class="btn-ghost bs-dyn-popup-x" id="bs-dyn-popup-close">✕</button>
+  </div>
+  <div class="bs-dyn-popup-body">
+    <!-- SIZE — Pressure -->
+    <div class="bs-dpop-grp" id="bs-dpop-size-pressure">
+      <div id="bs-size-curve-container"></div>
+      <div class="bs-row" title="Minimum size multiplier (clamp floor after all dynamics)"><span class="bs-label">Min size</span><input type="range" class="slider bs-sl" id="bs-size-min" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-size-min-val" value="0%" maxlength="4"></div>
+      <div class="bs-row" title="Maximum size multiplier (clamp ceiling after all dynamics)"><span class="bs-label">Max size</span><input type="range" class="slider bs-sl" id="bs-size-max" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-size-max-val" value="100%" maxlength="4"></div>
+    </div>
+    <!-- SIZE — Velocity -->
+    <div class="bs-dpop-grp" id="bs-dpop-size-velocity" style="display:none">
+      <div id="bs-size-speed-curve-container"></div>
+      <div class="bs-row" title="Minimum size multiplier"><span class="bs-label">Min size</span><input type="range" class="slider bs-sl" id="bs-size-vel-min" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-size-vel-min-val" value="0%" maxlength="4"></div>
+      <div class="bs-row" title="Maximum size multiplier"><span class="bs-label">Max size</span><input type="range" class="slider bs-sl" id="bs-size-vel-max" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-size-vel-max-val" value="100%" maxlength="4"></div>
+    </div>
+    <!-- SIZE — Tilt -->
+    <div class="bs-dpop-grp" id="bs-dpop-size-tilt" style="display:none">
+      <div id="bs-size-tilt-curve-container"></div>
+      <div class="bs-row" title="Minimum size multiplier"><span class="bs-label">Min size</span><input type="range" class="slider bs-sl" id="bs-size-tlt-min" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-size-tlt-min-val" value="0%" maxlength="4"></div>
+      <div class="bs-row" title="Maximum size multiplier"><span class="bs-label">Max size</span><input type="range" class="slider bs-sl" id="bs-size-tlt-max" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-size-tlt-max-val" value="100%" maxlength="4"></div>
+    </div>
+    <!-- SIZE — Random -->
+    <div class="bs-dpop-grp" id="bs-dpop-size-random" style="display:none">
+      <p class="bs-dpop-note">Random jitter per stamp — no curve</p>
+    </div>
+    <!-- OPACITY — Pressure -->
+    <div class="bs-dpop-grp" id="bs-dpop-opac-pressure" style="display:none">
+      <div id="bs-opacity-curve-container"></div>
+      <div class="bs-row" title="Minimum opacity multiplier (clamp floor)"><span class="bs-label">Min opac.</span><input type="range" class="slider bs-sl" id="bs-opac-min" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-opac-min-val" value="0%" maxlength="4"></div>
+      <div class="bs-row" title="Maximum opacity multiplier (clamp ceiling)"><span class="bs-label">Max opac.</span><input type="range" class="slider bs-sl" id="bs-opac-max" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-opac-max-val" value="100%" maxlength="4"></div>
+    </div>
+    <!-- OPACITY — Velocity -->
+    <div class="bs-dpop-grp" id="bs-dpop-opac-velocity" style="display:none">
+      <div id="bs-opacity-speed-curve-container"></div>
+      <div class="bs-row" title="Minimum opacity multiplier"><span class="bs-label">Min opac.</span><input type="range" class="slider bs-sl" id="bs-opac-vel-min" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-opac-vel-min-val" value="0%" maxlength="4"></div>
+      <div class="bs-row" title="Maximum opacity multiplier"><span class="bs-label">Max opac.</span><input type="range" class="slider bs-sl" id="bs-opac-vel-max" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-opac-vel-max-val" value="100%" maxlength="4"></div>
+    </div>
+    <!-- OPACITY — Random -->
+    <div class="bs-dpop-grp" id="bs-dpop-opac-random" style="display:none">
+      <p class="bs-dpop-note">Random jitter per stamp — no curve</p>
+    </div>
+    <!-- FLOW — Pressure -->
+    <div class="bs-dpop-grp" id="bs-dpop-flow-pressure" style="display:none">
+      <div id="bs-flow-curve-container"></div>
+      <div class="bs-row" title="Minimum flow multiplier (clamp floor)"><span class="bs-label">Min flow</span><input type="range" class="slider bs-sl" id="bs-flow-min" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-flow-min-val" value="0%" maxlength="4"></div>
+      <div class="bs-row" title="Maximum flow multiplier (clamp ceiling)"><span class="bs-label">Max flow</span><input type="range" class="slider bs-sl" id="bs-flow-max" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-flow-max-val" value="100%" maxlength="4"></div>
+    </div>
   </div>
 </div>
 

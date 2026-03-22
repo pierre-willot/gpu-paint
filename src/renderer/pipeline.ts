@@ -5,12 +5,17 @@ import { serializeProject, deserializeProject,
 import { Command }                              from '../core/history-manager';
 import { LayerManager, LayerState, BlendMode }  from './layer-manager';
 import { BrushRenderer, DirtyRect }             from './brush-renderer';
+import { SmudgeRenderer }                       from './smudge-renderer';
+import { CpuSmudgeEngine }                      from './cpu-smudge-engine';
 import { CompositeRenderer }                    from './composite-renderer';
 import { CheckpointManager, Checkpoint }        from './checkpoint-manager';
 import { SelectionManager, SelectionMode }      from './selection-manager';
 import { EffectsPipeline }                      from './effects-pipeline';
+import { TransformPipeline, TransformState }    from './transform-pipeline';
+import type { BrushDescriptor }                 from './brush-descriptor';
 
 export { SelectionMode };
+export type { TransformState };
 
 interface GPUTiming {
     querySet:    GPUQuerySet;
@@ -22,6 +27,10 @@ interface GPUTiming {
 export class PaintPipeline {
     public  layerManager:      LayerManager;
     public  brushRenderer:     BrushRenderer;
+    public  smudgeRenderer:    SmudgeRenderer;
+    public  cpuSmudgeEngine:   CpuSmudgeEngine;
+    private _cpuSmudgeReady    = false;
+    public  get cpuSmudgeReady(): boolean { return this._cpuSmudgeReady; }
     public  selectionManager:  SelectionManager;
     public  effectsPipeline:   EffectsPipeline;
     private compositeRenderer: CompositeRenderer;
@@ -31,6 +40,14 @@ export class PaintPipeline {
     private backingTexture:  GPUTexture;
     private needsRedraw      = true;
 
+    // ── Transform mode state ─────────────────────────────────────────────────
+    private transformPipelineInstance: TransformPipeline | null = null;
+    private transformSourceTex:        GPUTexture | null        = null;
+    private transformPreviewTex:       GPUTexture | null        = null;
+    private transformHoleTex:          GPUTexture | null        = null;
+    private _transformLayerIdx:        number                   = -1;
+    public  get transformActive(): boolean { return this.transformPreviewTex !== null; }
+
     private frameDirtyRect:  DirtyRect | null = null;
     private prevOverlayRect: DirtyRect | null = null;
 
@@ -38,6 +55,9 @@ export class PaintPipeline {
     private gpuTiming:       GPUTiming | null = null;
 
     public  currentBrushSize  = 0.05;
+    /** Set by draw()/drawSmudge() — checked in app.ts to decide whether to push to history. */
+    public hadPaintingSinceReset = false;
+    public resetPaintingFlag(): void { this.hadPaintingSinceReset = false; }
     /** Fill color [r,g,b,a] in 0–255 range, updated by app.setBrushColor(). */
     public  currentFillColor: [number, number, number, number] = [0, 0, 0, 255];
 
@@ -57,6 +77,8 @@ export class PaintPipeline {
     ) {
         this.layerManager      = new LayerManager(_device, _format, canvasWidth, canvasHeight);
         this.brushRenderer     = new BrushRenderer(_device, _format, canvasWidth, canvasHeight);
+        this.smudgeRenderer    = new SmudgeRenderer(_device, _format, canvasWidth, canvasHeight);
+        this.cpuSmudgeEngine   = new CpuSmudgeEngine();
         this.compositeRenderer = new CompositeRenderer(_device, _format);
         this.checkpointManager = new CheckpointManager();
         this.selectionManager  = new SelectionManager(_device, _format, canvasWidth, canvasHeight);
@@ -89,6 +111,120 @@ export class PaintPipeline {
         if (!layer) return;
         this.effectsPipeline.restoreTexture(layer.texture, snapshot);
         this.markDirty();
+    }
+
+    // ── Transform (C4) ───────────────────────────────────────────────────────
+
+    /**
+     * Enter transform mode. Stores `sourcePixels` (the content to transform)
+     * in a GPU source texture, clears the live layer so the composite shows
+     * only the transform preview, and renders the initial preview.
+     *
+     * @param holePixels  Optional — when transforming a selection, this is the
+     *                    layer-minus-selection pixels to write to the live layer
+     *                    (instead of clearing it completely to transparent).
+     */
+    public beginTransform(
+        sourcePixels: Uint8Array,
+        initialState: TransformState,
+        holePixels?: Uint8Array,
+    ): void {
+        // Lazy-create the transform pipeline (needs format, created once).
+        if (!this.transformPipelineInstance) {
+            this.transformPipelineInstance = new TransformPipeline(this._device, this._format);
+        }
+        this._transformLayerIdx = this.activeLayerIndex;
+
+        // Source texture: stores the pre-transform pixel data in GPU memory.
+        this.transformSourceTex = this._device.createTexture({
+            size:   [this.canvasWidth, this.canvasHeight],
+            format: this._format,
+            usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        });
+        this.effectsPipeline.restoreTexture(this.transformSourceTex, sourcePixels);
+
+        // Preview texture: the composite uses this instead of the live layer.
+        // COPY_DST is required so the hole texture can be copied here each frame.
+        this.transformPreviewTex = this._device.createTexture({
+            size:   [this.canvasWidth, this.canvasHeight],
+            format: this._format,
+            usage:  GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+                  | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
+        });
+
+        // Hole texture: unselected (or empty) background shown during transform.
+        // Always clear the live layer — the preview texture merges hole + content.
+        if (holePixels) {
+            this.transformHoleTex = this._device.createTexture({
+                size:   [this.canvasWidth, this.canvasHeight],
+                format: this._format,
+                usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
+            });
+            this.effectsPipeline.restoreTexture(this.transformHoleTex, holePixels);
+        }
+        this.layerManager.clearLayer(this._transformLayerIdx);
+
+        // Render initial preview (with hole as background if present).
+        const ar = this.canvasWidth / this.canvasHeight;
+        this.transformPipelineInstance.render(
+            this.transformSourceTex, this.transformPreviewTex, initialState, ar,
+            this.transformHoleTex ?? undefined,
+        );
+        this.markDirty();
+    }
+
+    /** Update the transform — call on every pointer move while in transform mode. */
+    public updateTransform(state: TransformState): void {
+        if (!this.transformPipelineInstance || !this.transformSourceTex || !this.transformPreviewTex) return;
+        const ar = this.canvasWidth / this.canvasHeight;
+        this.transformPipelineInstance.render(
+            this.transformSourceTex, this.transformPreviewTex, state, ar,
+            this.transformHoleTex ?? undefined,
+        );
+        this.markDirty();
+    }
+
+    /**
+     * Commit the current transform: copy preview → live layer.
+     * Returns the after-pixels for history.
+     */
+    public async commitTransform(): Promise<Uint8Array> {
+        if (!this.transformPreviewTex) return new Uint8Array();
+        const layer = this.layerManager.layers[this._transformLayerIdx];
+        if (layer) {
+            const enc = this._device.createCommandEncoder();
+            enc.copyTextureToTexture(
+                { texture: this.transformPreviewTex },
+                { texture: layer.texture },
+                [this.canvasWidth, this.canvasHeight]
+            );
+            this._device.queue.submit([enc.finish()]);
+            await this._device.queue.onSubmittedWorkDone();
+        }
+        const afterPixels = layer
+            ? await this.effectsPipeline.snapshotTexture(layer.texture)
+            : new Uint8Array();
+        this._cleanupTransform();
+        this.markDirty();
+        return afterPixels;
+    }
+
+    /** Cancel transform: restore the original pixels to the live layer. */
+    public cancelTransform(sourcePixels: Uint8Array): void {
+        const layer = this.layerManager.layers[this._transformLayerIdx];
+        if (layer) this.effectsPipeline.restoreTexture(layer.texture, sourcePixels);
+        this._cleanupTransform();
+        this.markDirty();
+    }
+
+    private _cleanupTransform(): void {
+        this.transformSourceTex?.destroy();
+        this.transformPreviewTex?.destroy();
+        this.transformHoleTex?.destroy();
+        this.transformSourceTex  = null;
+        this.transformPreviewTex = null;
+        this.transformHoleTex    = null;
+        this._transformLayerIdx  = -1;
     }
 
     // ── Canvas resize (B11) ───────────────────────────────────────────────────
@@ -148,6 +284,7 @@ export class PaintPipeline {
         this.overlayTexture = createPersistentTexture(this._device, physW, physH, this._format);
 
         this.brushRenderer.updateResolution(physW, physH);
+        this.smudgeRenderer.updateResolution(physW, physH);
         this.selectionManager.resize?.(physW, physH);
         this.checkpointManager.clear?.();
 
@@ -186,6 +323,38 @@ export class PaintPipeline {
     private syncMask(): void {
         const tex = this.selectionManager.hasMask ? this.selectionManager.getMaskTexture() : null;
         this.brushRenderer.setMaskTexture(tex);
+    }
+
+    // ── Direct undo / redo (pixel-based — no replay needed) ──────────────────
+
+    public async directUndoCommand(cmd: Command): Promise<void> {
+        if (cmd.type === 'stroke' || cmd.type === 'smudge' || cmd.type === 'cut' || cmd.type === 'transform') {
+            this.activeLayerIndex = cmd.layerIndex;
+            const layer = this.layerManager.layers[cmd.layerIndex];
+            if (layer) this.effectsPipeline.restoreTexture(layer.texture, cmd.beforePixels);
+        } else if (cmd.type === 'selection') {
+            const snapshot = cmd.beforeMask
+                ? { data: cmd.beforeMask, hasMask: true }
+                : { data: new Uint8Array(this.selectionManager.getMaskData().length), hasMask: false };
+            this.selectionManager.restoreFromSnapshot(snapshot);
+            this.syncMask();
+        }
+        this.markDirty();
+    }
+
+    public async directRedoCommand(cmd: Command): Promise<void> {
+        if (cmd.type === 'stroke' || cmd.type === 'smudge' || cmd.type === 'cut' || cmd.type === 'transform') {
+            this.activeLayerIndex = cmd.layerIndex;
+            const layer = this.layerManager.layers[cmd.layerIndex];
+            if (layer) this.effectsPipeline.restoreTexture(layer.texture, cmd.afterPixels);
+        } else if (cmd.type === 'selection') {
+            const snapshot = cmd.afterMask
+                ? { data: cmd.afterMask, hasMask: true }
+                : { data: new Uint8Array(this.selectionManager.getMaskData().length), hasMask: false };
+            this.selectionManager.restoreFromSnapshot(snapshot);
+            this.syncMask();
+        }
+        this.markDirty();
     }
 
     // ── Effects ───────────────────────────────────────────────────────────────
@@ -232,10 +401,69 @@ export class PaintPipeline {
     public handleCommandDropped(): void           { this.checkpointManager.shiftDown();   }
     public handleRedoInvalidated(l: number): void { this.checkpointManager.pruneAbove(l); }
 
+    // ── Smudge ────────────────────────────────────────────────────────────────
+
+    /** Seeds the smudge carry texture from the active layer. Call at stroke start. */
+    public beginSmudgeStroke(): void {
+        const layer = this.layerManager.getActiveLayer();
+        if (!layer) return;
+        this.smudgeRenderer.beginStroke(layer.texture);
+    }
+
+    /** Two-pass GPU smudge render (pickup + deposit). Call from SmudgeTool.drawToLayer. */
+    public drawSmudge(stamps: Float32Array, descriptor: BrushDescriptor): void {
+        if (!stamps.length) return;
+        this.hadPaintingSinceReset = true;
+        const layer = this.layerManager.getActiveLayer();
+        if (!layer) return;
+        const maskTex = this.selectionManager.hasMask ? this.selectionManager.getMaskTexture() : null;
+        const rect    = this.smudgeRenderer.draw(stamps, layer.texture, maskTex, descriptor.smudge, descriptor.hardness);
+        this.expandDirtyRect(rect);
+        this.needsRedraw = true;
+    }
+
+    // ── CPU Smudge ────────────────────────────────────────────────────────────
+
+    /**
+     * Async GPU readback — seeds the CPU pixel buffer from the active layer.
+     * SmudgeTool calls this at stroke start and processes pending stamps in the
+     * returned Promise's `.then()`.
+     */
+    public async beginCpuSmudgeStroke(): Promise<void> {
+        this._cpuSmudgeReady = false;
+        const layer = this.layerManager.getActiveLayer();
+        if (!layer) return;
+        await this.cpuSmudgeEngine.initFromTexture(this._device, layer.texture);
+        this._cpuSmudgeReady = true;
+    }
+
+    /** Apply a stamp batch on the CPU pixel buffer and upload result to GPU. */
+    public drawCpuSmudge(stamps: Float32Array, descriptor: BrushDescriptor): void {
+        if (!stamps.length || !this._cpuSmudgeReady) return;
+        this.hadPaintingSinceReset = true;
+        const layer = this.layerManager.getActiveLayer();
+        if (!layer) return;
+        this.cpuSmudgeEngine.applyStamps(
+            stamps,
+            descriptor.smudge,    // strength
+            descriptor.hardness,  // falloff sharpness
+            descriptor.wetness,   // lift_carry
+        );
+        this.cpuSmudgeEngine.uploadToTexture(this._device, layer.texture);
+        this.markDirty();
+    }
+
+    /** Free CPU pixel buffer. Call at stroke end. */
+    public endCpuSmudgeStroke(): void {
+        this._cpuSmudgeReady = false;
+        this.cpuSmudgeEngine.endStroke();
+    }
+
     // ── Drawing ───────────────────────────────────────────────────────────────
 
     public draw(stamps: Float32Array): void {
         if (!stamps.length) return;
+        this.hadPaintingSinceReset = true;
         const layer = this.layerManager.getActiveLayer(); if (!layer) return;
         const rect  = this.brushRenderer.draw(stamps, layer.texture);
         this.expandDirtyRect(rect);
@@ -275,10 +503,14 @@ export class PaintPipeline {
         const cur = this.context.getCurrentTexture(); if (!cur) return;
         const scissor = this.frameDirtyRect; this.frameDirtyRect = null;
 
+        const texOverride = this.transformPreviewTex
+            ? { layerIndex: this._transformLayerIdx, texture: this.transformPreviewTex }
+            : null;
+
         if (this.gpuTiming && !this.gpuTiming.pending) {
-            this.compositeWithTiming(this.backingTexture.createView(), scissor);
+            this.compositeWithTiming(this.backingTexture.createView(), scissor, texOverride);
         } else {
-            this.compositeRenderer.render(this.backingTexture.createView(), this.layers, this.overlayTexture, scissor);
+            this.compositeRenderer.render(this.backingTexture.createView(), this.layers, this.overlayTexture, scissor, undefined, texOverride);
         }
 
         if (this.selectionManager.hasMask) {
@@ -305,13 +537,10 @@ export class PaintPipeline {
             this.layerManager.removeLayer(cmd.layerIndex);
             this.expandDirtyRect(this.fullCanvasRect());
         } else if (cmd.type === 'stroke') {
+            // Stroke was already painted live to the GPU texture during the stroke.
+            // applyCommand is a no-op — just update active layer and mark dirty.
             this.activeLayerIndex = cmd.layerIndex;
-            const layer = this.layerManager.getActiveLayer();
-            if (layer) {
-                this.brushRenderer.setConfig({ blendMode: cmd.blendMode });
-                this.expandDirtyRect(this.brushRenderer.draw(cmd.stamps, layer.texture));
-                this.brushRenderer.setConfig({ blendMode: 'normal' });
-            }
+            this.expandDirtyRect(this.fullCanvasRect());
         } else if (cmd.type === 'selection') {
             // Selection was already applied directly by SelectionTool for immediate
             // visual feedback. applyCommand is only called for new commands (not
@@ -319,9 +548,16 @@ export class PaintPipeline {
             // by the pipeline.setRectSelection/setLassoSelection/deselect calls
             // made by the tool. We just ensure dirty flag is set.
             this.expandDirtyRect(this.fullCanvasRect());
+        } else if (cmd.type === 'smudge') {
+            // Smudge already applied live. applyCommand = no-op except dirty flag.
+            this.activeLayerIndex = cmd.layerIndex;
+            this.expandDirtyRect(this.fullCanvasRect());
+        } else if (cmd.type === 'transform') {
+            // Transform committed live. applyCommand = no-op.
+            this.activeLayerIndex = cmd.layerIndex;
+            this.expandDirtyRect(this.fullCanvasRect());
         } else if (cmd.type === 'cut') {
-            // Cut was already applied to the GPU texture before pushing to history.
-            // Just mark dirty to trigger recomposite.
+            // Cut already applied live. applyCommand = no-op except dirty flag.
             this.expandDirtyRect(this.fullCanvasRect());
         } else if (cmd.type === 'paste') {
             const layer = this.layerManager.addLayer();
@@ -333,20 +569,31 @@ export class PaintPipeline {
     }
 
     public async reconstructFromHistory(history: Command[]): Promise<void> {
-        // Clear selection mask from brush renderer before replaying —
-        // strokes recorded before a selection was made must not be clipped by it.
+        // Clear stale selection state before reconstruction.
+        this.selectionManager.restoreFromSnapshot({ data: new Uint8Array(this.selectionManager.getMaskData().length), hasMask: false });
         this.brushRenderer.setMaskTexture(null);
 
         const cp = this.checkpointManager.findNearest(history.length);
         if (cp) {
             await this.checkpointManager.restore(cp, this.layerManager, this._device, this.canvasWidth, this.canvasHeight);
-            for (const cmd of history.slice(cp.stackLength)) this.replayCommand(cmd);
+            for (let i = 0; i < history.length; i++) {
+                const cmd = history[i];
+                if (cmd.type === 'selection') {
+                    // Selection commands are always replayed in order — they're cheap
+                    // and not baked into checkpoints.
+                    this.replayCommand(cmd);
+                } else if (i >= cp.stackLength) {
+                    // Post-checkpoint non-selection commands: restore their after-pixels.
+                    this.replayCommand(cmd);
+                }
+                // Pre-checkpoint non-selection commands: skip (pixels baked into checkpoint).
+            }
         } else {
             this.layerManager.destroyAll();
             for (const cmd of history) this.replayCommand(cmd);
         }
+
         this.brushRenderer.setConfig({ blendMode: 'normal' });
-        // Re-sync mask after replay — selection is preserved across undo/redo
         this.syncMask();
         if (!this.layers.length) this.layerManager.addLayer();
         this.activeLayerIndex = Math.min(this.activeLayerIndex, this.layers.length - 1);
@@ -382,7 +629,7 @@ export class PaintPipeline {
         const ov  = createPersistentTexture(this._device, this.canvasWidth, this.canvasHeight, this._format);
         this.layerManager.clearTexture(ov);
         this.compositeRenderer.render(exp.createView(), this.layers, ov, null);
-        await downloadTexture(this._device, exp, 'artwork.png');
+        await downloadTexture(this._device, exp, 'artwork.png', this._format);
         exp.destroy(); ov.destroy();
     }
 
@@ -424,45 +671,22 @@ export class PaintPipeline {
             this.layerManager.addLayer();
         } else if (cmd.type === 'delete-layer') {
             this.layerManager.removeLayer(cmd.layerIndex);
-        } else if (cmd.type === 'stroke') {
+        } else if (cmd.type === 'stroke' || cmd.type === 'smudge' || cmd.type === 'cut' || cmd.type === 'transform') {
+            // Pixel-based commands: restore the post-operation snapshot directly.
             this.activeLayerIndex = cmd.layerIndex;
-            const layer = this.layerManager.getActiveLayer();
-            if (layer) {
-                this.brushRenderer.setConfig({ blendMode: cmd.blendMode });
-                this.brushRenderer.draw(cmd.stamps, layer.texture);
-                this.brushRenderer.setConfig({ blendMode: 'normal' });
-            }
-        } else if (cmd.type === 'selection') {
-            // Update selectionManager state only — syncMask() called after all commands replayed
-            this.applySelectionCommand(cmd);
-        } else if (cmd.type === 'cut') {
             const layer = this.layerManager.layers[cmd.layerIndex];
-            if (layer) this.effectsPipeline.restoreTexture(layer.texture, cmd.pixels);
+            if (layer) this.effectsPipeline.restoreTexture(layer.texture, cmd.afterPixels);
+        } else if (cmd.type === 'selection') {
+            // Restore selection mask state then sync to brush renderer.
+            const snapshot = cmd.afterMask
+                ? { data: cmd.afterMask, hasMask: true }
+                : { data: new Uint8Array(this.selectionManager.getMaskData().length), hasMask: false };
+            this.selectionManager.restoreFromSnapshot(snapshot);
+            this.syncMask();
         } else if (cmd.type === 'paste') {
             const layer = this.layerManager.addLayer();
             layer.name  = 'Pasted Layer';
             this.effectsPipeline.restoreTexture(layer.texture, cmd.pixels);
-        }
-    }
-
-    private applySelectionCommand(cmd: Extract<Command, { type: 'selection' }>): void {
-        switch (cmd.operation) {
-            case 'rect':
-                this.selectionManager.setRect(cmd.x ?? 0, cmd.y ?? 0, cmd.w ?? 0, cmd.h ?? 0, cmd.selMode as any);
-                break;
-            case 'lasso':
-                if (cmd.points && cmd.points.length >= 6)
-                    this.selectionManager.setLasso(cmd.points, cmd.selMode as any);
-                break;
-            case 'selectAll':
-                this.selectionManager.selectAll();
-                break;
-            case 'deselect':
-                this.selectionManager.deselect();
-                break;
-            case 'invertSelection':
-                this.selectionManager.invertSelection();
-                break;
         }
     }
 
@@ -498,9 +722,9 @@ export class PaintPipeline {
         this.gpuTiming    = { querySet, queryBuffer, readBuffer, pending: false };
     }
 
-    private compositeWithTiming(targetView: GPUTextureView, scissor: DirtyRect | null): void {
+    private compositeWithTiming(targetView: GPUTextureView, scissor: DirtyRect | null, texOverride?: { layerIndex: number; texture: GPUTexture } | null): void {
         const t = this.gpuTiming!;
-        this.compositeRenderer.render(targetView, this.layers, this.overlayTexture, scissor, t.querySet);
+        this.compositeRenderer.render(targetView, this.layers, this.overlayTexture, scissor, t.querySet, texOverride);
         const enc = this._device.createCommandEncoder();
         enc.resolveQuerySet(t.querySet, 0, 2, t.queryBuffer, 0);
         enc.copyBufferToBuffer(t.queryBuffer, 0, t.readBuffer, 0, 16);

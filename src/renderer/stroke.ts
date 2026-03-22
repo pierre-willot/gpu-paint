@@ -274,7 +274,25 @@ export class StrokeEngine {
 
     private stampSegment(p0: FullPoint, p1: FullPoint, p2: FullPoint, p3: FullPoint): void {
         const d = this.descriptor!;
-        const spacing = Math.max(0.0001, d.size * d.spacing);
+
+        // Use effective stamp size at segment midpoint so spacing stays proportional
+        // to actual stamp size when pressure/tilt/speed dynamics shrink the brush.
+        // Without this, small stamps (e.g. at low pressure) appear more spread apart
+        // than intended because spacing was computed from the full nominal size.
+        const midP     = (p1.p + p2.p) * 0.5;
+        const effMidP  = this.pressureLUT ? this.mapPressure(midP) : midP;
+        let   sizeMult = 1.0;
+        if (this.dynLUTs) {
+            if (d.sizePressureCurve.mode !== 'off') {
+                sizeMult *= sampleDynLUT(this.dynLUTs, DLUT_SIZE_PRESSURE, effMidP);
+            } else {
+                sizeMult *= 1.0 - d.pressureSize * (1.0 - effMidP);
+            }
+        } else {
+            sizeMult *= 1.0 - d.pressureSize * (1.0 - effMidP);
+        }
+        sizeMult = Math.max(d.sizeMin, Math.min(d.sizeMax === 0 ? 1 : d.sizeMax, sizeMult));
+        const spacing = Math.max(0.0001, d.size * sizeMult * d.spacing);
 
         const STEPS = 16;
         const arc   = new Float32Array(STEPS + 1);
@@ -324,8 +342,21 @@ export class StrokeEngine {
         // Pressure remapping
         const effP = this.pressureLUT ? this.mapPressure(p) : p;
 
+        // Tilt gate: if no tilt feature is enabled, zero out tilt so the shader
+        // skips all deformation (tilt_aspect=1, no azimuth rotation).
+        // The shader always applies tilt when tiltX/Y are non-zero, so we must
+        // explicitly pass 0,0 rather than relying on descriptor flags alone.
+        const anyTiltActive =
+            d.tiltShape ||
+            d.tiltAngle ||
+            d.tiltAngleInfluence > 0 ||
+            d.sizeTiltCurve.mode      !== 'off' ||
+            d.roundnessTiltCurve.mode !== 'off';
+        const stampTiltX = anyTiltActive ? tiltX : 0;
+        const stampTiltY = anyTiltActive ? tiltY : 0;
+
         // Derived inputs for LUT lookup
-        const tiltMag  = Math.sqrt(tiltX*tiltX + tiltY*tiltY) / 90; // 0..1 (90° = 1)
+        const tiltMag  = Math.sqrt(stampTiltX*stampTiltX + stampTiltY*stampTiltY) / 90; // 0..1 (90° = 1)
         const normSpeed = Math.min(1.0, velocity / 20.0);            // 0..1
 
         // ── Size dynamics ─────────────────────────────────────────────────────
@@ -528,7 +559,7 @@ export class StrokeEngine {
                 this.emitStamp(d.taperEnd, [
                     bx, by, effP, bristleSize,
                     r, g, b, a,
-                    tiltX, tiltY,
+                    stampTiltX, stampTiltY,
                     bOpacity, stampAngle,
                     roundness, grainDepthScale,
                     0, 0
@@ -549,7 +580,7 @@ export class StrokeEngine {
             this.emitStamp(d.taperEnd, [
                 sx, sy, effP, finalSize,
                 r, g, b, a,
-                tiltX, tiltY,
+                stampTiltX, stampTiltY,
                 finalOpacity, stampAngle,
                 roundness, grainDepthScale,
                 0, 0

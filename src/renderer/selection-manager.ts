@@ -105,6 +105,17 @@ export class SelectionManager {
         this.uploadToGPU();
     }
 
+    public getMaskSnapshot(): { data: Uint8Array; hasMask: boolean } {
+        return { data: this.maskData.slice(), hasMask: this._hasMask };
+    }
+
+    public restoreFromSnapshot(snapshot: { data: Uint8Array; hasMask: boolean }): void {
+        if (snapshot.data.length !== this.maskData.length) return;
+        this.maskData.set(snapshot.data);
+        this._hasMask = snapshot.hasMask;
+        this.uploadToGPU();
+    }
+
     // ── Public — marching ants ────────────────────────────────────────────────
 
     public renderOverlay(targetView: GPUTextureView, _nowMs?: number): void {

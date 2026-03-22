@@ -1,6 +1,9 @@
 // src/ui/panel-manager.ts
 const PANEL_TOP   = 52 + 16; // header-h + 16px gap
-const INTERACTIVE = 'button,input,select,textarea,[contenteditable],a,.layer-drag-handle,summary,.bp-item,.bp-filter-chip';
+// Scroll containers are included so makeDraggable never calls e.preventDefault()
+// on them — that would suppress the mousedown event (per W3C spec), breaking
+// layer selection, brush preset selection, and all pen/touch scroll.
+const INTERACTIVE = 'button,input,select,textarea,[contenteditable],a,.layer-drag-handle,summary,.bp-item,.bp-filter-chip,.bs-body,.bp-list,.layer-list,.prefs-body';
 
 let globalResizing = false; // prevents drag firing during resize
 

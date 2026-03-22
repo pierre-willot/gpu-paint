@@ -40,6 +40,12 @@ export interface AppEventMap {
 
     // Save status — subscribed by ToolbarUI to update the save indicator
     'save:status': SaveStatus;
+
+    // Transform mode active/inactive
+    'transform:change': { active: boolean };
+
+    // Brush engine A/B toggle
+    'brush:engine': { engine: 'a' | 'b' };
 }
 
 export type AppEventName    = keyof AppEventMap;

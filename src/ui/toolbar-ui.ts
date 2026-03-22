@@ -1,5 +1,6 @@
 import { PaintApp }   from '../core/app';
 import { SaveStatus } from '../core/event-bus';
+import type { Tool }  from '../core/tool';
 
 export class ToolbarUI {
     private undoBtn:    HTMLButtonElement | null;
@@ -11,6 +12,13 @@ export class ToolbarUI {
     private relativeIntervalId: number | null = null;
 
     private fileInput: HTMLInputElement;
+
+    // Alt-key temporary eyedropper
+    private altEyedropperActive = false;
+    private altPreviousTool: Tool | null = null;
+
+    /** Called when any tool button is clicked while that tool is already active. */
+    public onToolSettingsOpen: (() => void) | null = null;
 
     constructor(private app: PaintApp) {
         this.undoBtn    = document.getElementById('undoBtn')     as HTMLButtonElement | null;
@@ -73,7 +81,7 @@ export class ToolbarUI {
 
     public updateBrushDot(size: number): void {
         if (!this.brushDot) return;
-        const d = Math.max(2, Math.round((size / 0.15) * 32));
+        const d = Math.max(2, Math.round((size / 0.375) * 32));
         this.brushDot.style.width  = d + 'px';
         this.brushDot.style.height = d + 'px';
     }
@@ -85,24 +93,38 @@ export class ToolbarUI {
     private wireToolButtons(): void {
         const brushBtn      = document.getElementById('toolBrush');
         const eraserBtn     = document.getElementById('toolEraser');
+        const smudgeBtn     = document.getElementById('toolSmudge');
         const eyedropperBtn = document.getElementById('toolEyedropper');
         const fillBtn       = document.getElementById('toolFill');
         const selectBtn     = document.getElementById('toolSelect');
+        const transformBtn  = document.getElementById('toolTransform');
 
-        const allBtns = [brushBtn, eraserBtn, eyedropperBtn, fillBtn, selectBtn];
+        const allBtns = [brushBtn, eraserBtn, smudgeBtn, eyedropperBtn, fillBtn, selectBtn, transformBtn];
 
         const setActive = (active: HTMLElement | null) => {
             allBtns.forEach(b => b?.classList.remove('active'));
             active?.classList.add('active');
         };
 
+        const openSettingsIfActive = (toolName: string) => {
+            if (this.app.activeToolName === toolName) this.onToolSettingsOpen?.();
+        };
+
         brushBtn?.addEventListener('click', () => {
-            this.app.setTool(this.app.brushTool);
+            const isBrushActive = this.app.activeToolName === 'BrushTool' || this.app.activeToolName === 'BrushToolB';
+            if (isBrushActive) this.onToolSettingsOpen?.();
+            this.app.setTool(this.app.activeBrushTool);
             setActive(brushBtn);
         });
         eraserBtn?.addEventListener('click', () => {
+            openSettingsIfActive('EraserTool');
             this.app.setTool(this.app.eraserTool);
             setActive(eraserBtn);
+        });
+        smudgeBtn?.addEventListener('click', () => {
+            openSettingsIfActive('SmudgeTool');
+            this.app.setTool(this.app.smudgeTool);
+            setActive(smudgeBtn);
         });
         eyedropperBtn?.addEventListener('click', () => {
             this.app.setTool(this.app.eyedropperTool);
@@ -113,17 +135,23 @@ export class ToolbarUI {
             setActive(fillBtn);
         });
         selectBtn?.addEventListener('click', () => {
+            openSettingsIfActive('SelectionTool');
             this.app.setTool(this.app.selectionTool);
             setActive(selectBtn);
+        });
+        transformBtn?.addEventListener('click', () => {
+            this.app.enterTransform();
         });
 
         // Sync when tool changes via keyboard shortcut
         this.app.bus.on('tool:change', ({ tool }) => {
-            brushBtn?.classList.toggle('active',      tool === 'BrushTool');
+            brushBtn?.classList.toggle('active',      tool === 'BrushTool' || tool === 'BrushToolB');
             eraserBtn?.classList.toggle('active',     tool === 'EraserTool');
+            smudgeBtn?.classList.toggle('active',     tool === 'SmudgeTool');
             eyedropperBtn?.classList.toggle('active', tool === 'EyedropperTool');
             fillBtn?.classList.toggle('active',       tool === 'FillTool');
             selectBtn?.classList.toggle('active',     tool === 'SelectionTool');
+            transformBtn?.classList.toggle('active',  tool === 'TransformTool');
         });
     }
 
@@ -141,32 +169,62 @@ export class ToolbarUI {
             const ctrl = e.ctrlKey || e.metaKey;
             const key  = e.key.toLowerCase();
 
+            // Alt-key temporary eyedropper (first keydown only, not repeat)
+            if (e.key === 'Alt' && !e.repeat && !ctrl) {
+                e.preventDefault();
+                if (!this.altEyedropperActive) {
+                    this.altEyedropperActive = true;
+                    this.altPreviousTool = this.app.activeTool;
+                    this.app.setTool(this.app.eyedropperTool);
+                }
+                return;
+            }
+
+            // Delete key — clear selected pixels (or full layer)
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                e.preventDefault();
+                await this.app.clearPixels();
+                return;
+            }
+
             // Undo / Redo
             if (ctrl && key === 'z' && !e.shiftKey) { e.preventDefault(); await this.app.history.undo(); }
             if ((ctrl && key === 'y') || (ctrl && e.shiftKey && key === 'z')) { e.preventDefault(); await this.app.history.redo(); }
 
             // Tools
-            if (!ctrl && key === 'b') this.app.setTool(this.app.brushTool);
+            if (!ctrl && key === 'b') this.app.setTool(this.app.activeBrushTool);
             if (!ctrl && key === 'e') this.app.setTool(this.app.eraserTool);
+            if (!ctrl && key === 'm') this.app.setTool(this.app.smudgeTool);
             if (!ctrl && key === 'i') this.app.setTool(this.app.eyedropperTool);
             if (!ctrl && key === 'g') this.app.setTool(this.app.fillTool);
-            if (!ctrl && key === 'm') this.app.setTool(this.app.selectionTool);
+            if (!ctrl && key === 'r') this.app.setTool(this.app.selectionTool);
+            if (!ctrl && key === 't') { this.app.enterTransform(); }
 
             // Brush size
-            if (!ctrl && key === '[') {
+            if (!ctrl && key === 'q') {
                 const s = this.app.pipeline.currentBrushSize;
                 this.app.setBrushSize(Math.max(0.005, s - 0.005));
                 this.syncSizeSlider();
             }
-            if (!ctrl && key === ']') {
+            if (!ctrl && key === 'w') {
                 const s = this.app.pipeline.currentBrushSize;
                 this.app.setBrushSize(Math.min(0.15, s + 0.005));
                 this.syncSizeSlider();
             }
 
             // Selection shortcuts
-            if (ctrl && key === 'a') { e.preventDefault(); this.app.pipeline.selectAll(); }
-            if (ctrl && key === 'd') { e.preventDefault(); this.app.pipeline.deselect(); }
+            if (ctrl && key === 'a') { e.preventDefault(); this.app.selectAll(); }
+            if (ctrl && key === 'd') { e.preventDefault(); this.app.deselect(); }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'Alt' && this.altEyedropperActive) {
+                this.altEyedropperActive = false;
+                if (this.altPreviousTool) {
+                    this.app.setTool(this.altPreviousTool);
+                    this.altPreviousTool = null;
+                }
+            }
         });
     }
 

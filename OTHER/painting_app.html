@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paint · Studio</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+    :root{
+      --bg:#565b62;--header-bg:rgba(46,50,58,0.98);--panel-bg:rgba(50,55,65,0.94);
+      --track-bg:rgba(28,31,38,0.9);--border:rgba(255,255,255,0.1);--border-hi:rgba(255,255,255,0.18);
+      --text-1:#f4f7fd;--text-2:#bcc8da;--text-3:#7e8fa2;
+      --track-h:22px;--thumb-d:18px;--header-h:52px;--panel-w:228px;
+      --panel-top:calc(var(--header-h) + 16px); /* all panels sit at least 16px below header */
+    }
+    html,body{height:100%;width:100%;overflow:hidden;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-1);user-select:none}
+
+    /* ── Focus mode ── */
+    body.focus-mode header,body.focus-mode .float-panel,body.focus-mode .transform-bar,body.focus-mode .effect-panel{display:none!important}
+    body.focus-mode .workspace,body.focus-mode .canvas-wrap{top:0!important}
+    #focusExitBtn{position:fixed;top:12px;left:12px;z-index:999;display:none;width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:rgba(30,33,42,0.85);backdrop-filter:blur(12px);cursor:pointer;align-items:center;justify-content:center;color:rgba(255,255,255,0.7);transition:color 0.12s,background 0.12s}
+    #focusExitBtn:hover{background:rgba(50,54,64,0.95);color:#fff}
+    body.focus-mode #focusExitBtn{display:flex}
+
+    /* ────────────────────────────────────────
+       UNIVERSAL GHOST BUTTON — same look as .txt-field
+       transparent → hover shows faint border+bg → active/on is darker
+    ──────────────────────────────────────── */
+    .btn-ghost{
+      background:transparent;
+      border:1px solid transparent;
+      border-radius:8px;
+      color:var(--text-2);
+      cursor:pointer;
+      font-family:'DM Sans',sans-serif;
+      transition:background 0.12s,border-color 0.12s,color 0.12s;
+      display:flex;align-items:center;justify-content:center;
+    }
+    .btn-ghost:hover{border-color:var(--border);background:rgba(0,0,0,0.15);color:var(--text-1)}
+    .btn-ghost:active,.btn-ghost.active{background:rgba(0,0,0,0.32);border-color:var(--border-hi);color:var(--text-1)}
+    .btn-ghost svg{pointer-events:none;display:block}
+
+    /* ── Global textfield ── */
+    .txt-field{
+      font-family:'DM Mono',monospace;font-size:11px;color:var(--text-2);
+      background:transparent;padding:3px 5px;border-radius:8px;
+      border:1px solid transparent;outline:none;
+      transition:background 0.12s,border-color 0.12s,color 0.12s;cursor:text;
+    }
+    .txt-field:hover{border-color:var(--border);background:rgba(0,0,0,0.15)}
+    .txt-field:focus{background:rgba(0,0,0,0.38);border-color:var(--border-hi);color:var(--text-1)}
+
+    /* ═══ GRID ═══ */
+    .workspace{position:fixed;inset:0;top:var(--header-h);background-color:var(--bg);background-image:linear-gradient(rgba(255,255,255,0.08) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.08) 1px,transparent 1px),linear-gradient(rgba(255,255,255,0.15) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.15) 1px,transparent 1px);background-size:16px 16px,16px 16px,80px 80px,80px 80px}
+
+    /* ═══ HEADER ═══ */
+    header{position:fixed;top:0;left:0;right:0;height:var(--header-h);background:var(--header-bg);border-bottom:1px solid var(--border);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);display:flex;align-items:center;padding:0 10px;z-index:100;box-shadow:0 2px 10px rgba(0,0,0,0.3)}
+
+    /* menus */
+    .menu-group{display:flex;gap:2px;align-items:center}
+    .menu-item-wrap{position:relative;display:inline-flex}
+    .menu-btn{height:34px;padding:0 11px;border-radius:8px;border:1px solid transparent;background:transparent;display:flex;align-items:center;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;color:var(--text-2);transition:background 0.12s,border-color 0.12s,color 0.12s}
+    .menu-btn:hover{background:rgba(0,0,0,0.15);border-color:var(--border);color:var(--text-1)}
+    .menu-btn.open{background:rgba(0,0,0,0.32);border-color:var(--border-hi);color:var(--text-1)}
+
+    .dropdown{position:absolute;top:calc(100% + 16px);left:0;min-width:220px;background:rgba(36,40,50,0.99);border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:5px;box-shadow:0 18px 44px rgba(0,0,0,0.6),0 2px 8px rgba(0,0,0,0.35);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);z-index:500;display:none;flex-direction:column;gap:1px;animation:dropIn 0.11s ease}
+    .dropdown.open{display:flex}
+    @keyframes dropIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+    .drop-item{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:400;color:var(--text-2);transition:background 0.1s,color 0.1s;white-space:nowrap}
+    .drop-item:hover{background:rgba(255,255,255,0.06);color:var(--text-1)}
+    .drop-shortcut{font-size:11px;font-family:'DM Mono',monospace;color:var(--text-3);margin-left:24px}
+    .drop-sep{height:1px;background:rgba(255,255,255,0.08);margin:4px 2px}
+    .drop-label{padding:4px 12px 2px;font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-3)}
+
+    .header-spacer{flex:1}
+    .divider{width:1px;height:26px;background:var(--border-hi);margin:0 5px}
+    .tool-group{display:flex;gap:2px;align-items:center}
+
+    /* tool buttons using ghost style */
+    .tool-btn{height:38px;min-width:38px;padding:0 8px;position:relative}
+    .tool-btn.active{background:rgba(0,0,0,0.32)!important;border-color:var(--border-hi)!important;color:var(--text-1)!important}
+    .tool-tip{position:absolute;bottom:-30px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:500;color:var(--text-2);background:rgba(24,27,34,0.97);border:1px solid var(--border-hi);padding:3px 9px;border-radius:5px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity 0.1s;z-index:200}
+    .btn-ghost:hover .tool-tip{opacity:1}
+    .btn-ghost.active .tool-tip{opacity:0!important}
+
+    .search-btn{height:32px;padding:0 10px;font-size:12px;font-weight:500;gap:7px}
+    .search-btn kbd{font-family:'DM Mono',monospace;font-size:10px;background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px}
+
+    /* ═══ CANVAS ═══ */
+    .canvas-wrap{position:fixed;top:var(--header-h);left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:1;pointer-events:none}
+    .canvas-stack{position:relative;pointer-events:auto;border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,0.2),0 8px 24px rgba(0,0,0,0.24),0 2px 6px rgba(0,0,0,0.14)}
+    #mainCanvas{display:block;border-radius:2px}
+    #noiseOverlay{position:absolute;top:0;left:0;display:block;border-radius:2px;pointer-events:none;opacity:0.05}
+
+    /* ═══ FLOAT PANELS ═══ */
+    .float-panel{
+      position:fixed;
+      background:var(--panel-bg);border:1px solid var(--border-hi);border-radius:16px;
+      backdrop-filter:blur(28px) saturate(1.3);-webkit-backdrop-filter:blur(28px) saturate(1.3);
+      box-shadow:0 1px 0 rgba(255,255,255,0.07) inset,0 10px 28px rgba(0,0,0,0.3),0 2px 6px rgba(0,0,0,0.18);
+      z-index:50;overflow:hidden;display:flex;flex-direction:column;
+      cursor:grab; /* entire panel surface is draggable */
+    }
+    .float-panel:active{cursor:grabbing}
+    /* interactive children restore normal cursor */
+    .float-panel button,.float-panel input,.float-panel select,.float-panel [contenteditable]{cursor:default}
+    .float-panel input[type=range]{cursor:pointer}
+
+    .panel-pill{position:absolute;left:50%;top:8px;transform:translateX(-50%);width:22px;height:3px;background:rgba(255,255,255,0.15);border-radius:2px;pointer-events:none;z-index:1}
+
+    /* ═══ LEFT PANEL ═══ */
+    .left-panel{left:20px;top:var(--panel-top);width:76px;min-width:60px;max-width:160px;min-height:160px;height:calc(100vh - var(--panel-top) - 16px);max-height:380px}
+    .left-body{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:4px;padding:18px 0 6px}
+    .brush-preview-circle{width:42px;height:42px;border-radius:50%;flex-shrink:0;background:rgba(0,0,0,0.12);border:1px solid var(--border);display:flex;align-items:center;justify-content:center}
+    .brush-dot{border-radius:50%;background:var(--text-1);transition:width 0.1s,height 0.1s}
+    .vert-slider-wrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+    .vert-slider{-webkit-appearance:none;appearance:none;writing-mode:vertical-lr;direction:rtl;width:36px;height:100%;max-height:300px;background:transparent;outline:none;cursor:pointer}
+    .vert-slider::-webkit-slider-runnable-track{width:36px;border-radius:18px;background:var(--track-bg);border:1px solid rgba(255,255,255,0.09)}
+    .vert-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:36px;height:18px;border-radius:9px;background:transparent;border:1.5px solid rgba(255,255,255,0.88);box-shadow:0 1px 6px rgba(0,0,0,0.45);cursor:grab;transition:border-color 0.08s;margin-top:0}
+    .vert-slider::-webkit-slider-thumb:hover{border-color:#fff}
+    .vert-slider::-webkit-slider-thumb:active{cursor:grabbing}
+    .vert-slider::-moz-range-track{width:36px;border-radius:18px;background:var(--track-bg)}
+    .vert-slider::-moz-range-thumb{width:36px;height:18px;border-radius:9px;background:transparent;border:1.5px solid rgba(255,255,255,0.88);box-shadow:0 1px 6px rgba(0,0,0,0.45);cursor:grab}
+    .action-pair{display:flex;gap:5px}
+    .act-btn{width:32px;height:32px;border-radius:9px}
+
+    /* ═══ COLOR PANEL ═══ */
+    .right-panel{right:20px;top:var(--panel-top);width:var(--panel-w);min-width:180px;max-width:380px;min-height:160px}
+    .right-body{flex:1;min-height:0;padding:0 14px 14px;display:flex;flex-direction:column;overflow:hidden}
+    .color-swatch{width:100%;height:52px;border-radius:12px;background:rgb(0,120,255);box-shadow:0 3px 10px -3px rgba(0,0,0,0.35),inset 0 0 0 1px rgba(255,255,255,0.08);margin:18px 0 12px;flex-shrink:0;transition:background 0.08s ease;cursor:crosshair;position:relative}
+    .color-swatch-hint{position:absolute;right:8px;bottom:6px;font-size:9px;color:rgba(255,255,255,0.4);pointer-events:none;letter-spacing:0.3px}
+    .tab-row{display:flex;gap:3px;background:rgba(0,0,0,0.2);border-radius:8px;padding:3px;margin-bottom:12px;flex-shrink:0}
+    .tab-btn{flex:1;padding:5px 4px;border:none;border-radius:6px;background:transparent;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.4px;color:var(--text-3);cursor:pointer;transition:all 0.12s}
+    .tab-btn.active{background:rgba(0,0,0,0.32);border:1px solid var(--border-hi);color:var(--text-1)}
+    .color-sep{width:100%;height:1px;background:rgba(255,255,255,0.08);margin:12px 0;flex-shrink:0}
+    .rgb-pane{display:flex;flex-direction:column;gap:11px}
+    .hsv-pane{display:flex;flex-direction:column;gap:11px}
+    .slider-row{display:flex;align-items:center;gap:6px;width:100%}
+    .slider-label{width:13px;flex-shrink:0;font-size:11px;font-weight:600;text-align:center}
+    .slider-value{width:42px;flex-shrink:0;text-align:right} /* wider than before */
+
+    .slider{flex:1;min-width:0;height:var(--track-h);-webkit-appearance:none;appearance:none;background:transparent;outline:none;cursor:pointer}
+    .slider::-webkit-slider-runnable-track{height:var(--track-h);border-radius:11px;background:var(--track-bg);border:1px solid rgba(255,255,255,0.08)}
+    .slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:var(--thumb-d);height:var(--thumb-d);border-radius:50%;background:transparent;border:1.5px solid rgba(255,255,255,0.88);margin-top:0;box-shadow:0 1px 6px rgba(0,0,0,0.45);cursor:grab;transition:transform 0.08s,border-color 0.08s}
+    .slider::-webkit-slider-thumb:hover{transform:scale(1.18);border-color:#fff}
+    .slider::-webkit-slider-thumb:active{cursor:grabbing;transform:scale(1.05)}
+    .slider::-moz-range-track{height:var(--track-h);border-radius:11px;background:var(--track-bg)}
+    .slider::-moz-range-thumb{width:var(--thumb-d);height:var(--thumb-d);border-radius:50%;background:transparent;border:1.5px solid rgba(255,255,255,0.88);box-shadow:0 1px 6px rgba(0,0,0,0.45);cursor:grab}
+    #redSlider::-webkit-slider-runnable-track{background:linear-gradient(to right,var(--red-start),var(--red-end))}
+    #greenSlider::-webkit-slider-runnable-track{background:linear-gradient(to right,var(--green-start),var(--green-end))}
+    #blueSlider::-webkit-slider-runnable-track{background:linear-gradient(to right,var(--blue-start),var(--blue-end))}
+    #hueSlider::-webkit-slider-runnable-track{background:linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+    #satSlider::-webkit-slider-runnable-track{background:linear-gradient(to right,var(--sat-start),var(--sat-end))}
+    #valSlider::-webkit-slider-runnable-track{background:linear-gradient(to right,var(--val-start),var(--val-end))}
+    #redSlider::-moz-range-track{background:linear-gradient(to right,var(--red-start),var(--red-end))}
+    #greenSlider::-moz-range-track{background:linear-gradient(to right,var(--green-start),var(--green-end))}
+    #blueSlider::-moz-range-track{background:linear-gradient(to right,var(--blue-start),var(--blue-end))}
+    #hueSlider::-moz-range-track{background:linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+    #satSlider::-moz-range-track{background:linear-gradient(to right,var(--sat-start),var(--sat-end))}
+    #valSlider::-moz-range-track{background:linear-gradient(to right,var(--val-start),var(--val-end))}
+
+    /* ═══ LAYER PANEL ═══ */
+    .layer-panel{width:var(--panel-w);min-width:200px;max-width:420px;min-height:200px;top:var(--panel-top)}
+    .layer-toolbar{display:flex;align-items:center;gap:3px;padding:18px 8px 6px;border-bottom:1px solid rgba(255,255,255,0.06);flex-shrink:0}
+    .lyr-spacer{flex:1}
+    .lyr-btn{width:30px;height:30px;border-radius:8px}
+    .layer-opacity-row{display:flex;align-items:center;gap:6px;padding:6px 10px 4px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,0.06)}
+    .layer-opacity-label{font-size:10px;color:var(--text-3);flex-shrink:0;width:40px}
+    .layer-blend-select{height:22px;font-size:10px;font-family:'DM Sans',sans-serif;color:var(--text-2);background:rgba(0,0,0,0.12);border:1px solid transparent;border-radius:6px;padding:0 5px;cursor:pointer;outline:none;flex-shrink:0;transition:border-color 0.12s}
+    .layer-blend-select:hover{border-color:var(--border)}
+    .layer-blend-select:focus{border-color:var(--border-hi);background:rgba(0,0,0,0.3)}
+    .layer-opacity-val{width:42px;text-align:right}
+    .layer-opacity-slider{flex:1;height:16px;-webkit-appearance:none;appearance:none;background:transparent;outline:none;cursor:pointer;min-width:0}
+    .layer-opacity-slider::-webkit-slider-runnable-track{height:16px;border-radius:8px;background:var(--track-bg);border:1px solid rgba(255,255,255,0.08)}
+    .layer-opacity-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:transparent;border:1.5px solid rgba(255,255,255,0.82);box-shadow:0 1px 4px rgba(0,0,0,0.5);cursor:grab}
+    .layer-opacity-slider::-moz-range-track{height:16px;border-radius:8px;background:var(--track-bg)}
+    .layer-opacity-slider::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:transparent;border:1.5px solid rgba(255,255,255,0.82);cursor:grab}
+    .layer-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 6px 8px;display:flex;flex-direction:column;gap:2px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent;min-height:0}
+    .layer-list::-webkit-scrollbar{width:3px}
+    .layer-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px}
+    .layer-row{display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:10px;border:1px solid transparent;cursor:pointer;transition:background 0.12s,border-color 0.12s;flex-shrink:0}
+    .layer-row:hover{background:rgba(255,255,255,0.05)}
+    .layer-row.active{background:rgba(0,0,0,0.25);border-color:rgba(255,255,255,0.12)}
+    .layer-drag-handle{width:10px;flex-shrink:0;cursor:grab;opacity:0.28;display:flex;flex-direction:column;gap:2px;align-items:center}
+    .layer-drag-handle span{display:block;width:6px;height:1.5px;background:var(--text-1);border-radius:1px}
+    .layer-thumb{width:40px;height:30px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);flex-shrink:0;overflow:hidden;background:#f8f5ef;position:relative}
+    .layer-thumb::before{content:'';position:absolute;inset:0;background-image:linear-gradient(45deg,#ccc 25%,transparent 25%),linear-gradient(-45deg,#ccc 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#ccc 75%),linear-gradient(-45deg,transparent 75%,#ccc 75%);background-size:6px 6px;background-position:0 0,0 3px,3px -3px,-3px 0;opacity:0.3}
+    .layer-thumb canvas{position:absolute;inset:0;width:100%;height:100%}
+    .layer-info{flex:1;min-width:0}
+    .layer-name{font-size:11px;font-weight:500;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;outline:none}
+    .layer-name:focus{background:rgba(0,0,0,0.22);border-radius:3px;padding:0 3px}
+    .layer-blend-mode{font-size:10px;color:var(--text-3);margin-top:1px}
+
+    /* ═══ SELECTION POPUP ═══ */
+    .selection-popup{position:fixed;top:calc(var(--header-h)+8px);background:rgba(36,40,50,0.99);border:1px solid rgba(255,255,255,0.14);border-radius:14px;padding:10px;box-shadow:0 12px 36px rgba(0,0,0,0.55);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);z-index:400;display:none;flex-direction:column;gap:8px;min-width:190px;animation:dropIn 0.11s ease}
+    .selection-popup.open{display:flex}
+    .sel-section-label{font-size:9px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-3);margin-bottom:4px}
+    .sel-btn-row{display:flex;gap:3px}
+    .sel-btn{flex:1;height:28px;border-radius:7px;font-size:11px;padding:0 6px;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap}
+    .sel-btn svg{flex-shrink:0}
+
+    /* ═══ BRUSH SETTINGS PANEL ═══ */
+    .brush-settings-panel{width:230px;min-width:190px;max-width:360px;min-height:200px;top:var(--panel-top)}
+    .bs-body{flex:1;min-height:0;padding:18px 14px 14px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;scrollbar-width:thin}
+    .bs-section-label{font-size:9px;font-weight:600;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-3);margin-bottom:8px}
+    .bs-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+    .bs-label{font-size:11px;color:var(--text-2);width:58px;flex-shrink:0}
+    .bs-val{width:42px;text-align:right;flex-shrink:0}
+    .bs-toggle-row{display:flex;align-items:center;justify-content:space-between;padding:2px 0}
+    .toggle-switch{width:34px;height:18px;border-radius:9px;background:rgba(0,0,0,0.3);border:1px solid var(--border);cursor:pointer;position:relative;transition:background 0.2s;flex-shrink:0}
+    .toggle-switch.on{background:rgba(255,255,255,0.15);border-color:var(--border-hi)}
+    .toggle-switch::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:rgba(255,255,255,0.5);transition:transform 0.2s}
+    .toggle-switch.on::after{transform:translateX(16px);background:rgba(255,255,255,0.9)}
+    .pressure-curve-placeholder{width:100%;height:56px;border-radius:8px;background:rgba(0,0,0,0.2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center}
+
+    /* ═══ TRANSFORM BAR ═══ */
+    .transform-bar{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);display:none;background:rgba(36,40,50,0.96);border:1px solid rgba(255,255,255,0.14);border-radius:14px;padding:5px 10px;backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 8px 32px rgba(0,0,0,0.5);z-index:80;align-items:center;gap:4px}
+    .transform-bar.visible{display:flex}
+    .tb-btn{height:32px;padding:0 11px;border-radius:7px;font-size:12px;font-weight:500;white-space:nowrap}
+    .tb-sep{width:1px;height:20px;background:rgba(255,255,255,0.12);margin:0 3px}
+
+    /* ═══ EFFECT PANELS ═══ */
+    .effect-panel{position:fixed;top:var(--panel-top);left:50%;transform:translateX(-50%);width:280px;min-width:220px;max-width:380px;background:rgba(36,40,50,0.99);border:1px solid rgba(255,255,255,0.14);border-radius:16px;backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 18px 44px rgba(0,0,0,0.55);z-index:300;display:none;flex-direction:column}
+    .effect-panel.open{display:flex}
+    .effect-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid rgba(255,255,255,0.07);flex-shrink:0}
+    .effect-title{font-size:13px;font-weight:600;color:var(--text-1)}
+    .effect-close{width:26px;height:26px;border-radius:7px;font-size:16px;line-height:1}
+    .effect-body{padding:14px 16px 18px;display:flex;flex-direction:column;gap:14px}
+    .effect-row{display:flex;align-items:center;gap:8px}
+    .effect-label{width:80px;flex-shrink:0;font-size:11px;color:var(--text-2)}
+    .effect-val{width:42px;text-align:right;flex-shrink:0}
+    .effect-actions{display:flex;gap:6px;margin-top:4px}
+    .effect-apply{flex:1;height:32px;border-radius:8px;font-size:12px;font-weight:600}
+    .effect-reset{height:32px;padding:0 12px;border-radius:8px;font-size:12px}
+
+    /* ═══ QUICK SEARCH ═══ */
+    .search-overlay{position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.5);display:none;align-items:flex-start;justify-content:center;padding-top:80px;backdrop-filter:blur(4px)}
+    .search-overlay.open{display:flex;animation:fadeIn 0.12s ease}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    .search-modal{width:520px;max-width:90vw;background:rgba(32,35,44,0.99);border:1px solid rgba(255,255,255,0.15);border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.7)}
+    .search-input-wrap{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.08)}
+    .search-input-wrap svg{flex-shrink:0;opacity:0.5}
+    .search-input{flex:1;background:transparent;border:none;outline:none;font-size:15px;color:var(--text-1);font-family:'DM Sans',sans-serif}
+    .search-input::placeholder{color:var(--text-3)}
+    .search-results{max-height:360px;overflow-y:auto;padding:6px}
+    .search-result-item{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:8px;cursor:pointer;color:var(--text-2);font-size:13px;transition:background 0.1s,color 0.1s}
+    .search-result-item:hover{background:rgba(255,255,255,0.06);color:var(--text-1)}
+    .search-result-kbd{font-size:11px;font-family:'DM Mono',monospace;color:var(--text-3);background:rgba(255,255,255,0.07);padding:2px 7px;border-radius:5px;border:1px solid rgba(255,255,255,0.1)}
+    .search-empty{padding:24px;text-align:center;font-size:13px;color:var(--text-3)}
+
+    /* ═══ PREFS PANEL ═══ */
+    .prefs-panel{width:280px;min-width:240px;max-width:400px;min-height:200px;top:var(--panel-top);left:50%;transform:translateX(-50%)}
+    .prefs-body{flex:1;min-height:0;overflow-y:auto;padding:18px 14px 14px;display:flex;flex-direction:column;gap:16px;scrollbar-width:thin}
+    .prefs-section-label{font-size:9px;font-weight:600;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-3);margin-bottom:6px;display:flex;align-items:center;gap:8px}
+    .prefs-section-label::after{content:'';flex:1;height:1px;background:var(--border)}
+    .prefs-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0}
+    .prefs-label{font-size:12px;color:var(--text-2)}
+    .prefs-select{height:24px;font-size:11px;font-family:'DM Sans',sans-serif;color:var(--text-2);background:rgba(0,0,0,0.12);border:1px solid transparent;border-radius:6px;padding:0 6px;cursor:pointer;outline:none;transition:border-color 0.12s}
+    .prefs-select:hover{border-color:var(--border)}
+    .prefs-select:focus{border-color:var(--border-hi);background:rgba(0,0,0,0.3)}
+    .shortcut-list{display:flex;flex-direction:column;gap:2px}
+    .shortcut-row{display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+    .shortcut-name{font-size:11px;color:var(--text-2)}
+    .shortcut-key{font-size:10px;font-family:'DM Mono',monospace;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:5px;padding:2px 7px;color:var(--text-3)}
+
+    /* ═══ EXPORT PANEL ═══ */
+    .export-panel{width:240px;min-width:200px;max-width:360px;min-height:180px;top:var(--panel-top);left:50%;transform:translateX(-50%)}
+    .export-body{flex:1;padding:18px 14px 14px;display:flex;flex-direction:column;gap:6px}
+    .export-label{font-size:10px;color:var(--text-3);margin-bottom:2px}
+    .export-option-btn{width:100%;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-size:12px}
+    .export-badge{font-size:9px;font-family:'DM Mono',monospace;color:var(--text-3)}
+  </style>
+</head>
+<body>
+
+<!-- Focus mode exit -->
+<button id="focusExitBtn" onclick="toggleFocusMode()" title="Exit Focus Mode">
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M5 8h6M8 5v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+</button>
+
+<div class="workspace"></div>
+<div class="canvas-wrap">
+  <div class="canvas-stack" id="canvasStack">
+    <canvas id="mainCanvas"></canvas>
+    <canvas id="noiseOverlay"></canvas>
+  </div>
+</div>
+
+<!-- ═══ HEADER ═══ -->
+<header>
+  <div class="menu-group" id="menuGroup">
+
+    <div class="menu-item-wrap">
+      <button class="menu-btn" id="btnFile" onclick="toggleMenu('menuFile','btnFile')">File</button>
+      <div class="dropdown" id="menuFile">
+        <div class="drop-item"><span>New</span><span class="drop-shortcut">⌘N</span></div>
+        <div class="drop-item"><span>Open</span><span class="drop-shortcut">⌘O</span></div>
+        <div class="drop-item"><span>Import Image</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item"><span>Save</span><span class="drop-shortcut">⌘S</span></div>
+        <div class="drop-item" onclick="togglePanel('exportPanel')"><span>Export</span><span class="drop-shortcut">⇧⌘E</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item" id="timelapseToggle" onclick="toggleTimelapse()"><span>Record Timelapse</span></div>
+        <div class="drop-item"><span>Export Timelapse</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item"><span>Print</span><span class="drop-shortcut">⌘P</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item" onclick="togglePanel('prefsPanel')"><span>Preferences</span><span class="drop-shortcut">⌘,</span></div>
+        <div class="drop-item" onclick="openSearch()"><span>Keyboard Shortcuts</span></div>
+      </div>
+    </div>
+
+    <div class="menu-item-wrap">
+      <button class="menu-btn" id="btnEdit" onclick="toggleMenu('menuEdit','btnEdit')">Edit</button>
+      <div class="dropdown" id="menuEdit">
+        <div class="drop-item"><span>Undo</span><span class="drop-shortcut">⌘Z</span></div>
+        <div class="drop-item"><span>Redo</span><span class="drop-shortcut">⇧⌘Z</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item"><span>Cut</span><span class="drop-shortcut">⌘X</span></div>
+        <div class="drop-item"><span>Copy</span><span class="drop-shortcut">⌘C</span></div>
+        <div class="drop-item"><span>Paste</span><span class="drop-shortcut">⌘V</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item"><span>Select All</span><span class="drop-shortcut">⌘A</span></div>
+        <div class="drop-item"><span>Deselect</span><span class="drop-shortcut">⌘D</span></div>
+        <div class="drop-item"><span>Invert Selection</span><span class="drop-shortcut">⇧⌘I</span></div>
+        <div class="drop-item"><span>Fill Selection</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item"><span>Resize Canvas</span><span class="drop-shortcut">⌥⌘C</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item"><span>Clear Canvas</span></div>
+      </div>
+    </div>
+
+    <div class="menu-item-wrap">
+      <button class="menu-btn" id="btnEffects" onclick="toggleMenu('menuEffects','btnEffects')">Effects</button>
+      <div class="dropdown" id="menuEffects">
+        <div class="drop-label">Adjustments</div>
+        <div class="drop-item" onclick="openEffect('hueSat')"><span>Hue / Saturation</span><span class="drop-shortcut">⌘U</span></div>
+        <div class="drop-item" onclick="openEffect('colorBalance')"><span>Color Balance</span></div>
+        <div class="drop-item" onclick="openEffect('brightness')"><span>Brightness / Contrast</span></div>
+        <div class="drop-item" onclick="openEffect('curves')"><span>RGB Curves</span><span class="drop-shortcut">⌘M</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-label">Filters</div>
+        <div class="drop-item" onclick="openEffect('blur')"><span>Gaussian Blur</span></div>
+        <div class="drop-item" onclick="openEffect('noise')"><span>Noise</span></div>
+        <div class="drop-item" onclick="openEffect('sharpen')"><span>Sharpen</span></div>
+      </div>
+    </div>
+
+    <div class="menu-item-wrap">
+      <button class="menu-btn" id="btnView" onclick="toggleMenu('menuView','btnView')">View</button>
+      <div class="dropdown" id="menuView">
+        <div class="drop-item"><span>Zoom In</span><span class="drop-shortcut">⌘+</span></div>
+        <div class="drop-item"><span>Zoom Out</span><span class="drop-shortcut">⌘−</span></div>
+        <div class="drop-item"><span>Fit to Screen</span><span class="drop-shortcut">⌘0</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item"><span>Rotate View</span></div>
+        <div class="drop-item"><span>Reset Rotation</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item"><span>Flip Canvas Horizontal</span></div>
+        <div class="drop-item"><span>Flip Canvas Vertical</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item" id="menuBW" onclick="toggleBW(this)"><span>View in Black &amp; White</span></div>
+        <div class="drop-item"><span>Show Grid</span><span class="drop-shortcut">⌘'</span></div>
+        <div class="drop-item"><span>Show Rulers</span><span class="drop-shortcut">⌘R</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item" onclick="toggleFocusMode()"><span>Focus Mode</span><span class="drop-shortcut">Tab</span></div>
+      </div>
+    </div>
+
+    <div class="menu-item-wrap">
+      <button class="menu-btn" id="btnAbout" onclick="toggleMenu('menuAbout','btnAbout')">About</button>
+      <div class="dropdown" id="menuAbout">
+        <div class="drop-item"><span>Paint Studio v1.0</span></div>
+        <div class="drop-sep"></div>
+        <div class="drop-item"><span>Documentation</span></div>
+        <div class="drop-item"><span>Report a Bug</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="header-spacer"></div>
+
+  <button class="btn-ghost search-btn" onclick="openSearch()">
+    <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.4"/><line x1="9.5" y1="9.5" x2="13" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+    Quick Search <kbd>⌘K</kbd>
+  </button>
+
+  <div class="header-spacer"></div>
+
+  <div class="tool-group">
+    <!-- brush -->
+    <button class="btn-ghost tool-btn active" data-tool="brush" id="toolBrush" onclick="selectTool(this)">
+      <svg width="22" height="22" viewBox="0 0 32 32" fill="currentColor">
+        <path d="M9.6,30H3c-0.5,0-0.9-0.4-1-0.8c-0.1-0.5,0.2-1,0.7-1.1c1-0.3,1.6-1.3,1.6-2.4v-1c0-1.6,0.6-3.1,1.8-4.2c1.1-1,2.5-1.6,3.9-1.6c3,0.1,5.3,2.5,5.4,5.5c0,1.5-0.5,2.9-1.6,4C12.7,29.4,11.2,30,9.6,30z"/>
+        <path d="M29.3,5.7c-1-1-2.6-1-3.6,0l-13,11.6c2.2,0.9,3.8,2.7,4.5,5l12.2-13C30.3,8.3,30.2,6.7,29.3,5.7z"/>
+      </svg>
+      <span class="tool-tip">Brush · click again for settings</span>
+    </button>
+
+    <!-- eraser -->
+    <button class="btn-ghost tool-btn" data-tool="eraser" onclick="selectTool(this)">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <g transform="rotate(-38 11 12)">
+          <rect x="1.5" y="6.5" width="5.5" height="9" rx="2.5" fill="currentColor" opacity="0.45"/>
+          <rect x="8.5" y="6.5" width="12" height="9" rx="2.5" fill="currentColor"/>
+        </g>
+      </svg>
+      <span class="tool-tip">Eraser</span>
+    </button>
+
+    <!-- smudge -->
+    <button class="btn-ghost tool-btn" data-tool="blend" onclick="selectTool(this)">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="currentColor">
+        <path d="M11 3C11 3 6 9.5 6 14C6 17 8.2 19.5 11 19.5C13.8 19.5 16 17 16 14C16 9.5 11 3 11 3Z"/>
+        <ellipse cx="9" cy="13" rx="1.2" ry="2.4" fill="rgba(255,255,255,0.35)" transform="rotate(-15 9 13)"/>
+      </svg>
+      <span class="tool-tip">Smudge</span>
+    </button>
+
+    <!-- fill -->
+    <button class="btn-ghost tool-btn" data-tool="fill" onclick="selectTool(this)">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="currentColor">
+        <path d="M5 4L4 14Q4 16 6 16H14Q16 16 16 14L15 4Z" opacity="0.5"/>
+        <rect x="4" y="3" width="12" height="2.5" rx="1.2"/>
+        <path d="M7 3 Q7 1 10 1 Q13 1 13 3" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+        <path d="M19 11C19 11 17.5 14 17.5 15.5C17.5 16.4 18.1 17 19 17C19.9 17 20.5 16.4 20.5 15.5C20.5 14 19 11 19 11Z"/>
+      </svg>
+      <span class="tool-tip">Fill</span>
+    </button>
+
+    <div class="divider"></div>
+
+    <!-- selection -->
+    <button class="btn-ghost tool-btn" data-tool="select" id="toolSelect" onclick="selectTool(this);toggleSelectionPopup()">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <rect x="3" y="4" width="16" height="14" rx="1.2" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3.5 2"/>
+        <circle cx="3" cy="4" r="1.5" fill="currentColor"/>
+        <circle cx="19" cy="4" r="1.5" fill="currentColor"/>
+        <circle cx="3" cy="18" r="1.5" fill="currentColor"/>
+        <circle cx="19" cy="18" r="1.5" fill="currentColor"/>
+      </svg>
+      <span class="tool-tip">Selection</span>
+    </button>
+
+    <!-- transform -->
+    <button class="btn-ghost tool-btn" data-tool="transform" onclick="selectTool(this)">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <!-- bounding box -->
+        <rect x="5" y="5" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5 1.5"/>
+        <!-- corner handles -->
+        <rect x="3" y="3" width="4" height="4" rx="1" fill="currentColor" opacity="0.7"/>
+        <rect x="15" y="3" width="4" height="4" rx="1" fill="currentColor" opacity="0.7"/>
+        <rect x="3" y="15" width="4" height="4" rx="1" fill="currentColor" opacity="0.7"/>
+        <rect x="15" y="15" width="4" height="4" rx="1" fill="currentColor" opacity="0.7"/>
+      </svg>
+      <span class="tool-tip">Transform</span>
+    </button>
+
+    <div class="divider"></div>
+
+    <!-- layers toggle -->
+    <button class="btn-ghost tool-btn panel-toggle-btn" id="layerToggleBtn" onclick="toggleLayerPanel()">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="currentColor">
+        <rect x="3" y="15" width="16" height="4" rx="1.5"/>
+        <rect x="3" y="9.5" width="16" height="4" rx="1.5" opacity="0.65"/>
+        <rect x="3" y="4"   width="16" height="4" rx="1.5" opacity="0.38"/>
+      </svg>
+      <span class="tool-tip">Layers</span>
+    </button>
+
+    <!-- colors toggle -->
+    <button class="btn-ghost tool-btn panel-toggle-btn active" id="colorToggleBtn" onclick="toggleColorPanel()">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <path d="M11 2 A9 9 0 0 1 20 11 L11 11 Z" fill="rgba(255,100,100,0.85)"/>
+        <path d="M20 11 A9 9 0 0 1 11 20 L11 11 Z" fill="rgba(70,215,120,0.85)"/>
+        <path d="M11 20 A9 9 0 0 1 2 11 L11 11 Z" fill="rgba(75,145,255,0.85)"/>
+        <path d="M2 11 A9 9 0 0 1 11 2 L11 11 Z" fill="rgba(248,205,50,0.85)"/>
+        <circle cx="11" cy="11" r="3.5" fill="currentColor" opacity="0.9"/>
+      </svg>
+      <span class="tool-tip">Colors</span>
+    </button>
+  </div>
+</header>
+
+<!-- ═══ SELECTION POPUP ═══ -->
+<div class="selection-popup" id="selectionPopup">
+  <div>
+    <div class="sel-section-label">Type</div>
+    <div class="sel-btn-row">
+      <button class="btn-ghost sel-btn active" onclick="setSelType(this,'rect')">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5 1.5"/></svg>Rect
+      </button>
+      <button class="btn-ghost sel-btn" onclick="setSelType(this,'lasso')">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 2C4 2 2 4.5 2 7C2 9.5 4 11 6 11.5L7 12.5L8 11.5C10.5 10.5 12 8.5 12 7C12 4.2 9.5 2 7 2Z" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5 1.5" fill="none"/></svg>Lasso
+      </button>
+      <button class="btn-ghost sel-btn" onclick="setSelType(this,'poly')">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><polygon points="7,1.5 12.5,5 10.5,12 3.5,12 1.5,5" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5 1.5" fill="none"/><circle cx="7" cy="1.5" r="1.3" fill="currentColor"/></svg>Poly
+      </button>
+    </div>
+  </div>
+  <div>
+    <div class="sel-section-label">Mode</div>
+    <div class="sel-btn-row">
+      <button class="btn-ghost sel-btn active" onclick="setSelMode(this)">Replace</button>
+      <button class="btn-ghost sel-btn" onclick="setSelMode(this)">+ Add</button>
+      <button class="btn-ghost sel-btn" onclick="setSelMode(this)">− Sub</button>
+      <button class="btn-ghost sel-btn" onclick="setSelMode(this)">∩</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ LEFT PANEL ═══ -->
+<div class="float-panel left-panel" id="leftPanel">
+  <div class="panel-pill"></div>
+  <div class="left-body">
+    <div class="brush-preview-circle"><div class="brush-dot" id="brushDot" style="width:10px;height:10px;"></div></div>
+    <div class="vert-slider-wrap">
+      <input type="range" class="vert-slider" id="brushSlider" min="1" max="120" value="18" step="1">
+    </div>
+    <button class="btn-ghost act-btn" title="Pick Color" data-tool="eyedropper" style="width:52px;height:28px;border-radius:8px;">
+      <svg width="18" height="18" viewBox="0 0 22 22" fill="none">
+        <circle cx="11" cy="11" r="9" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="11" cy="11" r="5.5" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="11" cy="11" r="1.8" fill="currentColor"/>
+        <line x1="11" y1="1" x2="11" y2="4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="11" y1="17.5" x2="11" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="1" y1="11" x2="4.5" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="17.5" y1="11" x2="21" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <div class="action-pair">
+      <button class="btn-ghost act-btn" title="Undo">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 7L7 3.5V6H10C12.2 6 14 7.8 14 10S12.2 14 10 14H6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 7L7 10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      </button>
+      <button class="btn-ghost act-btn" title="Redo">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13 7L9 3.5V6H6C3.8 6 2 7.8 2 10S3.8 14 6 14H10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 7L9 10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ COLOR PANEL ═══ -->
+<div class="float-panel right-panel" id="rightPanel">
+  <div class="panel-pill"></div>
+  <div class="right-body">
+    <div class="color-swatch" id="colorSwatch"><span class="color-swatch-hint">drag H / V</span></div>
+    <div class="tab-row" id="colorTabRow">
+      <button class="tab-btn active" id="tabRgb" onclick="setColorTab('rgb')">RGB</button>
+      <button class="tab-btn" id="tabHsv" onclick="setColorTab('hsv')">HSV</button>
+    </div>
+    <div class="rgb-pane" id="rgbPane">
+      <div class="slider-row"><span class="slider-label" style="color:#f08888">R</span><input type="range" id="redSlider" class="slider" min="0" max="255" value="0" step="1"><input type="text" class="slider-value txt-field" id="redVal" value="0" maxlength="3"></div>
+      <div class="slider-row"><span class="slider-label" style="color:#70e888">G</span><input type="range" id="greenSlider" class="slider" min="0" max="255" value="120" step="1"><input type="text" class="slider-value txt-field" id="greenVal" value="120" maxlength="3"></div>
+      <div class="slider-row"><span class="slider-label" style="color:#70bcff">B</span><input type="range" id="blueSlider" class="slider" min="0" max="255" value="255" step="1"><input type="text" class="slider-value txt-field" id="blueVal" value="255" maxlength="3"></div>
+    </div>
+    <div class="color-sep" id="colorSep" style="display:none;"></div>
+    <div class="hsv-pane" id="hsvPane" style="display:none;">
+      <div class="slider-row"><span class="slider-label" style="color:var(--text-2)">H</span><input type="range" id="hueSlider" class="slider" min="0" max="360" value="212" step="1"><input type="text" class="slider-value txt-field" id="hueVal" value="212°" maxlength="4"></div>
+      <div class="slider-row"><span class="slider-label" style="color:var(--text-2)">S</span><input type="range" id="satSlider" class="slider" min="0" max="100" value="100" step="1"><input type="text" class="slider-value txt-field" id="satVal" value="100%" maxlength="4"></div>
+      <div class="slider-row"><span class="slider-label" style="color:var(--text-2)">V</span><input type="range" id="valSlider" class="slider" min="0" max="100" value="100" step="1"><input type="text" class="slider-value txt-field" id="valVal" value="100%" maxlength="4"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ LAYER PANEL ═══ -->
+<div class="float-panel layer-panel" id="layerPanel" style="display:none;right:20px;">
+  <div class="panel-pill"></div>
+  <div class="layer-toolbar">
+    <button class="btn-ghost lyr-btn" title="New Layer" onclick="addLayer()">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><line x1="8" y1="2" x2="8" y2="14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
+    <div class="lyr-spacer"></div>
+    <button class="btn-ghost lyr-btn" id="lyrLockBtn" title="Lock" onclick="toggleLyrProp('locked',this)">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="8" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M5 7V5.5A3 3 0 0 1 11 5.5V7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11" r="1.2" fill="currentColor"/></svg>
+    </button>
+    <button class="btn-ghost lyr-btn" id="lyrAlphaLockBtn" title="Alpha Lock" onclick="toggleLyrProp('alphaLock',this)">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.4" stroke-dasharray="3 2"/><circle cx="8" cy="8" r="2.5" fill="currentColor" opacity="0.7"/></svg>
+    </button>
+    <button class="btn-ghost lyr-btn" id="lyrClipBtn" title="Alpha Clip" onclick="toggleLyrProp('alphaClip',this)">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 2L14 2L14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 2L2 14L14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.35"/></svg>
+    </button>
+    <button class="btn-ghost lyr-btn" id="lyrVisBtn" title="Visibility" onclick="toggleLyrVis()">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><ellipse cx="8" cy="8" rx="6" ry="4" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>
+    </button>
+    <button class="btn-ghost lyr-btn" id="lyrDeleteBtn" title="Delete" onclick="deleteActiveLayer()" style="color:rgba(255,100,100,0.6)">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M6 4V2.5h4V4M5 4l.5 9.5h5L11 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+  <div class="layer-opacity-row">
+    <span class="layer-opacity-label">Opacity</span>
+    <input type="range" class="layer-opacity-slider" id="layerOpacity" min="0" max="100" value="100">
+    <input type="text" class="layer-opacity-val txt-field" id="layerOpacityVal" value="100%" maxlength="4" style="width:42px;text-align:right;">
+    <select class="layer-blend-select" id="layerBlend">
+      <option>Normal</option><option>Multiply</option><option>Screen</option>
+      <option>Overlay</option><option>Soft Light</option><option>Hard Light</option>
+      <option>Color Dodge</option><option>Color Burn</option>
+      <option>Darken</option><option>Lighten</option>
+      <option>Difference</option><option>Exclusion</option>
+      <option>Hue</option><option>Saturation</option><option>Color</option><option>Luminosity</option>
+    </select>
+  </div>
+  <div class="layer-list" id="layerList"></div>
+</div>
+
+<!-- ═══ BRUSH SETTINGS ═══ -->
+<div class="float-panel brush-settings-panel" id="brushSettingsPanel" style="display:none;left:110px;">
+  <div class="panel-pill"></div>
+  <div class="bs-body">
+    <div>
+      <div class="bs-section-label">Basic</div>
+      <div class="bs-row"><span class="bs-label">Opacity</span><input type="range" class="slider" style="flex:1;min-width:0;height:16px;" min="0" max="100" value="100" oninput="this.nextElementSibling.value=this.value+'%'"><input type="text" class="bs-val txt-field" value="100%" maxlength="4"></div>
+      <div class="bs-row"><span class="bs-label">Flow</span><input type="range" class="slider" style="flex:1;min-width:0;height:16px;" min="0" max="100" value="100" oninput="this.nextElementSibling.value=this.value+'%'"><input type="text" class="bs-val txt-field" value="100%" maxlength="4"></div>
+      <div class="bs-row"><span class="bs-label">Hardness</span><input type="range" class="slider" style="flex:1;min-width:0;height:16px;" min="0" max="100" value="80" oninput="this.nextElementSibling.value=this.value+'%'"><input type="text" class="bs-val txt-field" value="80%" maxlength="4"></div>
+      <div class="bs-row"><span class="bs-label">Spacing</span><input type="range" class="slider" style="flex:1;min-width:0;height:16px;" min="1" max="200" value="10" oninput="this.nextElementSibling.value=this.value+'%'"><input type="text" class="bs-val txt-field" value="10%" maxlength="4"></div>
+    </div>
+    <div>
+      <div class="bs-section-label">Dynamics</div>
+      <div class="bs-toggle-row"><span class="bs-label" style="font-size:12px;color:var(--text-2)">Color Jitter</span><div class="toggle-switch" onclick="this.classList.toggle('on')"></div></div>
+      <div class="bs-toggle-row" style="margin-top:8px"><span class="bs-label" style="font-size:12px;color:var(--text-2)">Dual Brush</span><div class="toggle-switch" onclick="this.classList.toggle('on')"></div></div>
+      <div class="bs-toggle-row" style="margin-top:8px"><span class="bs-label" style="font-size:12px;color:var(--text-2)">Wet Mix</span><div class="toggle-switch" onclick="this.classList.toggle('on')"></div></div>
+    </div>
+    <div>
+      <div class="bs-section-label">Pressure Curve</div>
+      <div class="pressure-curve-placeholder">
+        <svg width="160" height="48" viewBox="0 0 160 48" fill="none"><line x1="0" y1="48" x2="160" y2="0" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><circle cx="40" cy="36" r="4" fill="rgba(255,255,255,0.8)"/><circle cx="120" cy="12" r="4" fill="rgba(255,255,255,0.8)"/></svg>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TRANSFORM BAR ═══ -->
+<div class="transform-bar" id="transformBar">
+  <button class="btn-ghost tb-btn active" onclick="setTM(this,'uniform')">Uniform</button>
+  <button class="btn-ghost tb-btn" onclick="setTM(this,'freeform')">Freeform</button>
+  <button class="btn-ghost tb-btn" onclick="setTM(this,'distort')">Distort</button>
+  <button class="btn-ghost tb-btn" onclick="setTM(this,'warp')">Warp</button>
+  <div class="tb-sep"></div>
+  <button class="btn-ghost tb-btn" onclick="hideTransformBar()">Cancel</button>
+</div>
+
+<!-- ═══ EFFECT PANELS ═══ -->
+<div class="effect-panel" id="efx-hueSat">
+  <div class="effect-header"><span class="effect-title">Hue / Saturation</span><button class="btn-ghost effect-close" onclick="closeEffect('hueSat')">×</button></div>
+  <div class="effect-body">
+    <div class="effect-row"><span class="effect-label">Hue</span><input type="range" class="slider" style="flex:1;min-width:0;" min="-180" max="180" value="0" oninput="this.nextElementSibling.value=this.value"><input type="text" class="effect-val txt-field" value="0" maxlength="4"></div>
+    <div class="effect-row"><span class="effect-label">Saturation</span><input type="range" class="slider" style="flex:1;min-width:0;" min="-100" max="100" value="0" oninput="this.nextElementSibling.value=this.value+'%'"><input type="text" class="effect-val txt-field" value="0%" maxlength="4"></div>
+    <div class="effect-row"><span class="effect-label">Lightness</span><input type="range" class="slider" style="flex:1;min-width:0;" min="-100" max="100" value="0" oninput="this.nextElementSibling.value=this.value+'%'"><input type="text" class="effect-val txt-field" value="0%" maxlength="4"></div>
+    <div class="effect-actions"><button class="btn-ghost effect-apply">Apply</button><button class="btn-ghost effect-reset">Reset</button></div>
+  </div>
+</div>
+
+<div class="effect-panel" id="efx-colorBalance">
+  <div class="effect-header"><span class="effect-title">Color Balance</span><button class="btn-ghost effect-close" onclick="closeEffect('colorBalance')">×</button></div>
+  <div class="effect-body">
+    <div class="effect-row"><span class="effect-label">Cyan / Red</span><input type="range" class="slider" style="flex:1;min-width:0;" min="-100" max="100" value="0" oninput="this.nextElementSibling.value=this.value"><input type="text" class="effect-val txt-field" value="0" maxlength="4"></div>
+    <div class="effect-row"><span class="effect-label">Magenta / Green</span><input type="range" class="slider" style="flex:1;min-width:0;" min="-100" max="100" value="0" oninput="this.nextElementSibling.value=this.value"><input type="text" class="effect-val txt-field" value="0" maxlength="4"></div>
+    <div class="effect-row"><span class="effect-label">Yellow / Blue</span><input type="range" class="slider" style="flex:1;min-width:0;" min="-100" max="100" value="0" oninput="this.nextElementSibling.value=this.value"><input type="text" class="effect-val txt-field" value="0" maxlength="4"></div>
+    <div class="effect-actions"><button class="btn-ghost effect-apply">Apply</button><button class="btn-ghost effect-reset">Reset</button></div>
+  </div>
+</div>
+
+<div class="effect-panel" id="efx-brightness">
+  <div class="effect-header"><span class="effect-title">Brightness / Contrast</span><button class="btn-ghost effect-close" onclick="closeEffect('brightness')">×</button></div>
+  <div class="effect-body">
+    <div class="effect-row"><span class="effect-label">Brightness</span><input type="range" class="slider" style="flex:1;min-width:0;" min="-100" max="100" value="0" oninput="this.nextElementSibling.value=this.value"><input type="text" class="effect-val txt-field" value="0" maxlength="4"></div>
+    <div class="effect-row"><span class="effect-label">Contrast</span><input type="range" class="slider" style="flex:1;min-width:0;" min="-100" max="100" value="0" oninput="this.nextElementSibling.value=this.value"><input type="text" class="effect-val txt-field" value="0" maxlength="4"></div>
+    <div class="effect-actions"><button class="btn-ghost effect-apply">Apply</button><button class="btn-ghost effect-reset">Reset</button></div>
+  </div>
+</div>
+
+<div class="effect-panel" id="efx-curves">
+  <div class="effect-header"><span class="effect-title">RGB Curves</span><button class="btn-ghost effect-close" onclick="closeEffect('curves')">×</button></div>
+  <div class="effect-body">
+    <div style="width:100%;height:120px;border-radius:8px;background:rgba(0,0,0,0.25);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;">
+      <svg width="180" height="100" viewBox="0 0 180 100" fill="none"><line x1="0" y1="100" x2="180" y2="0" stroke="rgba(255,255,255,0.35)" stroke-width="1.5"/><path d="M0 100 C60 100 80 50 90 40 S130 0 180 0" stroke="rgba(255,255,255,0.8)" stroke-width="2" fill="none"/><circle cx="60" cy="68" r="5" fill="rgba(255,255,255,0.8)"/><circle cx="120" cy="22" r="5" fill="rgba(255,255,255,0.8)"/></svg>
+    </div>
+    <div class="effect-actions"><button class="btn-ghost effect-apply">Apply</button><button class="btn-ghost effect-reset">Reset</button></div>
+  </div>
+</div>
+
+<div class="effect-panel" id="efx-blur">
+  <div class="effect-header"><span class="effect-title">Gaussian Blur</span><button class="btn-ghost effect-close" onclick="closeEffect('blur')">×</button></div>
+  <div class="effect-body">
+    <div class="effect-row"><span class="effect-label">Radius</span><input type="range" class="slider" style="flex:1;min-width:0;" min="0" max="50" value="0" oninput="this.nextElementSibling.value=this.value+'px'"><input type="text" class="effect-val txt-field" value="0px" maxlength="4"></div>
+    <div class="effect-actions"><button class="btn-ghost effect-apply">Apply</button><button class="btn-ghost effect-reset">Reset</button></div>
+  </div>
+</div>
+
+<div class="effect-panel" id="efx-noise">
+  <div class="effect-header"><span class="effect-title">Noise</span><button class="btn-ghost effect-close" onclick="closeEffect('noise')">×</button></div>
+  <div class="effect-body">
+    <div class="effect-row"><span class="effect-label">Amount</span><input type="range" class="slider" style="flex:1;min-width:0;" min="0" max="100" value="0" oninput="this.nextElementSibling.value=this.value+'%'"><input type="text" class="effect-val txt-field" value="0%" maxlength="4"></div>
+    <div class="effect-actions"><button class="btn-ghost effect-apply">Apply</button><button class="btn-ghost effect-reset">Reset</button></div>
+  </div>
+</div>
+
+<div class="effect-panel" id="efx-sharpen">
+  <div class="effect-header"><span class="effect-title">Sharpen</span><button class="btn-ghost effect-close" onclick="closeEffect('sharpen')">×</button></div>
+  <div class="effect-body">
+    <div class="effect-row"><span class="effect-label">Amount</span><input type="range" class="slider" style="flex:1;min-width:0;" min="0" max="100" value="0" oninput="this.nextElementSibling.value=this.value+'%'"><input type="text" class="effect-val txt-field" value="0%" maxlength="4"></div>
+    <div class="effect-actions"><button class="btn-ghost effect-apply">Apply</button><button class="btn-ghost effect-reset">Reset</button></div>
+  </div>
+</div>
+
+<!-- ═══ QUICK SEARCH ═══ -->
+<div class="search-overlay" id="searchOverlay" onclick="closeSearch(event)">
+  <div class="search-modal">
+    <div class="search-input-wrap">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="var(--text-3)" stroke-width="1.4"/><line x1="10.5" y1="10.5" x2="14" y2="14" stroke="var(--text-3)" stroke-width="1.4" stroke-linecap="round"/></svg>
+      <input type="text" class="search-input" id="searchInput" placeholder="Search tools, menus, actions…" oninput="filterSearch(this.value)">
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<!-- ═══ PREFS PANEL ═══ -->
+<div class="float-panel prefs-panel" id="prefsPanel" style="display:none;">
+  <div class="panel-pill"></div>
+  <div class="prefs-body">
+    <div><div class="prefs-section-label">Interface</div>
+      <div class="prefs-row"><span class="prefs-label">Dark Theme</span><div class="toggle-switch on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="prefs-row"><span class="prefs-label">Brush Cursor</span><div class="toggle-switch on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="prefs-row"><span class="prefs-label">HiDPI Canvas</span><div class="toggle-switch on" onclick="this.classList.toggle('on')"></div></div>
+    </div>
+    <div><div class="prefs-section-label">Color</div>
+      <div class="prefs-row"><span class="prefs-label">Color Profile</span><select class="prefs-select"><option>sRGB IEC61966-2.1</option><option>Display P3</option><option>Adobe RGB (1998)</option></select></div>
+      <div class="prefs-row"><span class="prefs-label">View Transform</span><select class="prefs-select"><option>None</option><option>sRGB → Linear</option><option>ACES Filmic</option></select></div>
+    </div>
+    <div><div class="prefs-section-label">Performance</div>
+      <div class="prefs-row"><span class="prefs-label">GPU Acceleration</span><div class="toggle-switch on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="prefs-row"><span class="prefs-label">Undo History</span><select class="prefs-select"><option>40 steps</option><option>80 steps</option><option>150 steps</option></select></div>
+    </div>
+    <div><div class="prefs-section-label">Keyboard Shortcuts</div>
+      <div class="shortcut-list">
+        <div class="shortcut-row"><span class="shortcut-name">Brush</span><kbd class="shortcut-key">B</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Eraser</span><kbd class="shortcut-key">E</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Fill</span><kbd class="shortcut-key">G</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Eyedropper</span><kbd class="shortcut-key">I</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Selection</span><kbd class="shortcut-key">M</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Transform</span><kbd class="shortcut-key">T</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Undo</span><kbd class="shortcut-key">⌘Z</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Redo</span><kbd class="shortcut-key">⇧⌘Z</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Focus Mode</span><kbd class="shortcut-key">Tab</kbd></div>
+        <div class="shortcut-row"><span class="shortcut-name">Quick Search</span><kbd class="shortcut-key">⌘K</kbd></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ EXPORT PANEL ═══ -->
+<div class="float-panel export-panel" id="exportPanel" style="display:none;">
+  <div class="panel-pill"></div>
+  <div class="export-body">
+    <div class="export-label">Export As</div>
+    <button class="btn-ghost export-option-btn"><span>PNG</span><span class="export-badge">Lossless · Alpha</span></button>
+    <button class="btn-ghost export-option-btn"><span>JPEG</span><span class="export-badge">Compressed</span></button>
+    <button class="btn-ghost export-option-btn"><span>TIFF</span><span class="export-badge">High quality</span></button>
+    <button class="btn-ghost export-option-btn"><span>PSD</span><span class="export-badge">Layers preserved</span></button>
+    <button class="btn-ghost export-option-btn"><span>Procreate</span><span class="export-badge">.procreate</span></button>
+  </div>
+</div>
+
+<script>
+const HEADER=52;
+const PANEL_TOP=HEADER+16; // panels sit 16px below header
+
+/* ══ DROPDOWNS ══ */
+function toggleMenu(id,btnId){
+  const m=document.getElementById(id),b=document.getElementById(btnId);
+  const open=m.classList.contains('open');
+  document.querySelectorAll('.dropdown').forEach(x=>x.classList.remove('open'));
+  document.querySelectorAll('.menu-btn').forEach(x=>x.classList.remove('open'));
+  if(!open){m.classList.add('open');b.classList.add('open');}
+}
+document.addEventListener('mousedown',e=>{
+  if(!e.target.closest('#menuGroup')){
+    document.querySelectorAll('.dropdown').forEach(x=>x.classList.remove('open'));
+    document.querySelectorAll('.menu-btn').forEach(x=>x.classList.remove('open'));
+  }
+});
+
+/* ══ COLOR ══ */
+const swatch=document.getElementById('colorSwatch');
+const rS=document.getElementById('redSlider'),rV=document.getElementById('redVal');
+const gS=document.getElementById('greenSlider'),gV=document.getElementById('greenVal');
+const bS=document.getElementById('blueSlider'),bV=document.getElementById('blueVal');
+const hS=document.getElementById('hueSlider'),hV=document.getElementById('hueVal');
+const sS=document.getElementById('satSlider'),sV=document.getElementById('satVal');
+const vS=document.getElementById('valSlider'),vV=document.getElementById('valVal');
+let state={r:0,g:120,b:255,h:212,s:100,v:100},updating=false;
+function hsvToRgb(h,s,v){let sN=s/100,vN=v/100,c=vN*sN,hp=h/60,x=c*(1-Math.abs((hp%2)-1));let r1=0,g1=0,b1=0;if(hp<1){r1=c;g1=x;}else if(hp<2){r1=x;g1=c;}else if(hp<3){g1=c;b1=x;}else if(hp<4){g1=x;b1=c;}else if(hp<5){r1=x;b1=c;}else{r1=c;b1=x;}let m=vN-c;return{r:Math.round((r1+m)*255),g:Math.round((g1+m)*255),b:Math.round((b1+m)*255)};}
+function rgbToHsv(r,g,b){let rN=r/255,gN=g/255,bN=b/255,mx=Math.max(rN,gN,bN),mn=Math.min(rN,gN,bN),d=mx-mn,h=0;if(d){if(mx===rN)h=60*(((gN-bN)/d)%6);else if(mx===gN)h=60*((bN-rN)/d+2);else h=60*((rN-gN)/d+4);}if(h<0)h+=360;return{h:Math.round(h),s:Math.round(mx?d/mx*100:0),v:Math.round(mx*100)};}
+function getColor(){return `rgb(${state.r},${state.g},${state.b})`;}
+function updateGradients(){
+  rS.style.setProperty('--red-start',`rgb(0,${state.g},${state.b})`);rS.style.setProperty('--red-end',`rgb(255,${state.g},${state.b})`);
+  gS.style.setProperty('--green-start',`rgb(${state.r},0,${state.b})`);gS.style.setProperty('--green-end',`rgb(${state.r},255,${state.b})`);
+  bS.style.setProperty('--blue-start',`rgb(${state.r},${state.g},0)`);bS.style.setProperty('--blue-end',`rgb(${state.r},${state.g},255)`);
+  let gl=Math.round(state.v*255/100),fs=hsvToRgb(state.h,100,state.v);
+  sS.style.setProperty('--sat-start',`rgb(${gl},${gl},${gl})`);sS.style.setProperty('--sat-end',`rgb(${fs.r},${fs.g},${fs.b})`);
+  let fv=hsvToRgb(state.h,state.s,100);vS.style.setProperty('--val-start','rgb(0,0,0)');vS.style.setProperty('--val-end',`rgb(${fv.r},${fv.g},${fv.b})`);
+}
+function syncAll(){
+  updating=true;
+  rS.value=state.r;gS.value=state.g;bS.value=state.b;hS.value=state.h;sS.value=state.s;vS.value=state.v;
+  rV.value=String(state.r);gV.value=String(state.g);bV.value=String(state.b);
+  hV.value=state.h+'°';sV.value=state.s+'%';vV.value=state.v+'%';
+  swatch.style.background=getColor();updateGradients();updating=false;
+}
+function fromRgb(){if(updating)return;state.r=+rS.value;state.g=+gS.value;state.b=+bS.value;let h=rgbToHsv(state.r,state.g,state.b);state.h=h.h;state.s=h.s;state.v=h.v;syncAll();}
+function fromHsv(){if(updating)return;state.h=+hS.value;state.s=+sS.value;state.v=+vS.value;let r=hsvToRgb(state.h,state.s,state.v);state.r=r.r;state.g=r.g;state.b=r.b;syncAll();}
+rS.addEventListener('input',fromRgb);gS.addEventListener('input',fromRgb);bS.addEventListener('input',fromRgb);
+hS.addEventListener('input',fromHsv);sS.addEventListener('input',fromHsv);vS.addEventListener('input',fromHsv);
+function bindTxt(inp,sl,min,max,cb){
+  inp.addEventListener('focus',()=>inp.select());
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();inp.blur();}});
+  inp.addEventListener('blur',()=>{let n=Math.round(Math.min(max,Math.max(min,parseFloat(inp.value.replace(/[°%]/g,''))||0)));sl.value=n;cb();});
+}
+bindTxt(rV,rS,0,255,fromRgb);bindTxt(gV,gS,0,255,fromRgb);bindTxt(bV,bS,0,255,fromRgb);
+bindTxt(hV,hS,0,360,fromHsv);bindTxt(sV,sS,0,100,fromHsv);bindTxt(vV,vS,0,100,fromHsv);
+
+/* swatch drag */
+(()=>{
+  let drag=false,sx=0,sy=0,sh=0,sv=0;
+  swatch.addEventListener('mousedown',e=>{drag=true;sx=e.clientX;sy=e.clientY;sh=state.h;sv=state.v;e.preventDefault();e.stopPropagation();});
+  document.addEventListener('mousemove',e=>{if(!drag)return;state.h=Math.round(((sh+(e.clientX-sx)*0.5)%360+360)%360);state.v=Math.max(0,Math.min(100,Math.round(sv-(e.clientY-sy)*0.5)));const rgb=hsvToRgb(state.h,state.s,state.v);state.r=rgb.r;state.g=rgb.g;state.b=rgb.b;syncAll();});
+  document.addEventListener('mouseup',()=>{drag=false;});
+})();
+
+/* color panel mode */
+const rightPanel=document.getElementById('rightPanel'),colorTabRow=document.getElementById('colorTabRow');
+const rgbPane=document.getElementById('rgbPane'),hsvPane=document.getElementById('hsvPane'),colorSep=document.getElementById('colorSep');
+let colorTab='rgb';
+function setColorTab(t){colorTab=t;document.getElementById('tabRgb').classList.toggle('active',t==='rgb');document.getElementById('tabHsv').classList.toggle('active',t==='hsv');applyColorMode();}
+function applyColorMode(){const exp=rightPanel.offsetHeight>=370;colorTabRow.style.display=exp?'none':'flex';colorSep.style.display=exp?'block':'none';rgbPane.style.display=exp?'flex':(colorTab==='rgb'?'flex':'none');hsvPane.style.display=exp?'flex':(colorTab==='hsv'?'flex':'none');}
+new ResizeObserver(applyColorMode).observe(rightPanel);
+
+/* ══ BRUSH ══ */
+const brushSlider=document.getElementById('brushSlider'),brushDot=document.getElementById('brushDot');
+function updateBrush(){const s=+brushSlider.value,d=Math.max(2,Math.round((s/120)*32));brushDot.style.width=d+'px';brushDot.style.height=d+'px';}
+brushSlider.addEventListener('input',updateBrush);
+
+/* ══ TOOLS ══ */
+let currentTool='brush';
+const bsPanel=document.getElementById('brushSettingsPanel');
+let bsVisible=false;
+function selectTool(el){
+  const tool=el.dataset.tool;
+  if(tool==='brush'&&currentTool==='brush'){
+    bsVisible=!bsVisible;bsPanel.style.display=bsVisible?'flex':'none';
+    if(bsVisible&&!bsPanel._placed){const r=document.getElementById('toolBrush').getBoundingClientRect();bsPanel.style.left=(r.right+8)+'px';bsPanel.style.top=PANEL_TOP+'px';bsPanel._placed=true;}
+    return;
+  }
+  document.querySelectorAll('.tool-btn[data-tool]').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');currentTool=tool;
+  // transform bar: show for select and transform tools
+  const tb=document.getElementById('transformBar');
+  tb.classList.toggle('visible',tool==='select'||tool==='transform');
+}
+
+/* ══ SELECTION POPUP ══ */
+const selPopup=document.getElementById('selectionPopup');
+let selOpen=false;
+function toggleSelectionPopup(){
+  selOpen=!selOpen;selPopup.classList.toggle('open',selOpen);
+  if(selOpen){const r=document.getElementById('toolSelect').getBoundingClientRect();selPopup.style.left=r.left+'px';}
+}
+document.addEventListener('mousedown',e=>{if(selOpen&&!e.target.closest('#selectionPopup,#toolSelect')){selOpen=false;selPopup.classList.remove('open');}});
+function setSelType(btn,t){document.querySelectorAll('.sel-btn[id^="sel"]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+function setSelMode(btn){btn.closest('.sel-btn-row').querySelectorAll('.sel-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+
+/* ══ TRANSFORM ══ */
+function setTM(btn,m){document.querySelectorAll('.tb-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+function hideTransformBar(){document.getElementById('transformBar').classList.remove('visible');}
+
+/* ══ EFFECTS ══ */
+const EFFECT_MAP={hueSat:'efx-hueSat',colorBalance:'efx-colorBalance',brightness:'efx-brightness',curves:'efx-curves',blur:'efx-blur',noise:'efx-noise',sharpen:'efx-sharpen'};
+function openEffect(key){
+  // close others
+  Object.values(EFFECT_MAP).forEach(id=>{const p=document.getElementById(id);if(p)p.classList.remove('open');});
+  const p=document.getElementById(EFFECT_MAP[key]);if(p){p.classList.add('open');makeDraggable(p,p);}
+}
+function closeEffect(key){const p=document.getElementById(EFFECT_MAP[key]);if(p)p.classList.remove('open');}
+
+/* ══ CANVAS ══ */
+const canvas=document.getElementById('mainCanvas'),noiseEl=document.getElementById('noiseOverlay'),stack=document.getElementById('canvasStack');
+const ctx=canvas.getContext('2d'),noiseCtx=noiseEl.getContext('2d');
+const PAPER='#f8f5ef';
+function bakeNoise(w,h){noiseEl.width=w;noiseEl.height=h;const id=noiseCtx.createImageData(w,h),d=id.data;for(let i=0;i<d.length;i+=4){const v=Math.random()*255|0;d[i]=v;d[i+1]=v;d[i+2]=v;d[i+3]=255;}noiseCtx.putImageData(id,0,0);}
+function sizeCanvas(){const W=Math.floor(window.innerWidth*0.64),H=Math.floor((window.innerHeight-HEADER)*0.88);canvas.width=W;canvas.height=H;ctx.fillStyle=PAPER;ctx.fillRect(0,0,W,H);stack.style.width=W+'px';stack.style.height=H+'px';bakeNoise(W,H);}
+
+/* ══ LAYERS ══ */
+let layers=[{id:1,name:'Background',visible:true,bg:'#f8f5ef',opacity:100,locked:false,alphaLock:false,alphaClip:false},{id:2,name:'Layer 2',visible:true,bg:null,opacity:100,locked:false,alphaLock:false,alphaClip:false},{id:3,name:'Sketch',visible:true,bg:null,opacity:75,locked:false,alphaLock:false,alphaClip:false}];
+let activeLayerId=2,nextLayerId=4;
+const PALETTES=[['#f8f5ef'],['#4f9cff','#3a6ea5','#f8f5ef'],['#888','#aaa','#f8f5ef']];
+function eyeIcon(v){return v?`<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><ellipse cx="8" cy="8" rx="6" ry="4" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>`:`<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 2L14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M4.5 5.5C3.3 6.3 2.5 7.2 2 8C3.3 10.2 5.4 12 8 12C9 12 10 11.7 11 11.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M7 4.1C7.3 4 7.7 4 8 4C10.6 4 12.7 5.8 14 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`;}
+function renderLayerThumb(cvs,idx){cvs.width=40;cvs.height=30;const x=cvs.getContext('2d'),l=layers[idx];if(l.bg){x.fillStyle=l.bg;x.fillRect(0,0,40,30);}else{x.clearRect(0,0,40,30);const p=PALETTES[idx%PALETTES.length];p.forEach((c,i)=>{x.fillStyle=c+'cc';x.beginPath();x.arc(6+i*10,10+i*4,5+i*2,0,Math.PI*2);x.fill();});}}
+function updateLayerToolbar(){
+  const l=layers.find(x=>x.id===activeLayerId);if(!l)return;
+  document.getElementById('lyrLockBtn').classList.toggle('active',l.locked);
+  document.getElementById('lyrAlphaLockBtn').classList.toggle('active',l.alphaLock);
+  document.getElementById('lyrClipBtn').classList.toggle('active',l.alphaClip);
+  document.getElementById('lyrVisBtn').innerHTML=eyeIcon(l.visible);
+  document.getElementById('lyrVisBtn').classList.toggle('active',!l.visible);
+  document.getElementById('layerOpacity').value=l.opacity;
+  document.getElementById('layerOpacityVal').value=l.opacity+'%';
+}
+function renderLayers(){
+  const list=document.getElementById('layerList');list.innerHTML='';
+  [...layers].reverse().forEach((layer,ri)=>{
+    const origIdx=layers.length-1-ri;
+    const row=document.createElement('div');row.className='layer-row'+(layer.id===activeLayerId?' active':'');
+    if(!layer.visible)row.style.opacity='0.42';
+    const dh=document.createElement('div');dh.className='layer-drag-handle';for(let i=0;i<3;i++){const s=document.createElement('span');dh.appendChild(s);}
+    const tw=document.createElement('div');tw.className='layer-thumb';const tc=document.createElement('canvas');tw.appendChild(tc);renderLayerThumb(tc,origIdx);
+    const info=document.createElement('div');info.className='layer-info';
+    const nameEl=document.createElement('div');nameEl.className='layer-name';nameEl.textContent=layer.name;nameEl.contentEditable=true;nameEl.spellcheck=false;nameEl.addEventListener('input',()=>layer.name=nameEl.textContent);nameEl.addEventListener('mousedown',e=>e.stopPropagation());
+    const blendEl=document.createElement('div');blendEl.className='layer-blend-mode';blendEl.textContent='Normal · '+layer.opacity+'%';
+    info.appendChild(nameEl);info.appendChild(blendEl);
+    const visBtn=document.createElement('button');visBtn.className='btn-ghost lyr-btn';visBtn.style.cssText='width:26px;height:26px;border-radius:7px;';visBtn.innerHTML=eyeIcon(layer.visible);
+    visBtn.addEventListener('click',e=>{e.stopPropagation();layer.visible=!layer.visible;visBtn.innerHTML=eyeIcon(layer.visible);row.style.opacity=layer.visible?'1':'0.42';updateLayerToolbar();});
+    row.appendChild(dh);row.appendChild(tw);row.appendChild(info);row.appendChild(visBtn);
+    row.addEventListener('mousedown',e=>{if(nameEl.contains(e.target)||visBtn.contains(e.target))return;activeLayerId=layer.id;renderLayers();});
+    list.appendChild(row);
+  });
+  updateLayerToolbar();
+}
+function addLayer(){layers.push({id:nextLayerId,name:'Layer '+nextLayerId,visible:true,bg:null,opacity:100,locked:false,alphaLock:false,alphaClip:false});nextLayerId++;activeLayerId=layers[layers.length-1].id;renderLayers();}
+function deleteActiveLayer(){if(layers.length<=1)return;const i=layers.findIndex(x=>x.id===activeLayerId);layers.splice(i,1);activeLayerId=layers[Math.max(0,i-1)].id;renderLayers();}
+function toggleLyrProp(prop,btn){const l=layers.find(x=>x.id===activeLayerId);if(!l)return;l[prop]=!l[prop];btn.classList.toggle('active',l[prop]);}
+function toggleLyrVis(){const l=layers.find(x=>x.id===activeLayerId);if(!l)return;l.visible=!l.visible;renderLayers();}
+
+const layerOpSlider=document.getElementById('layerOpacity'),layerOpVal=document.getElementById('layerOpacityVal');
+layerOpSlider.addEventListener('input',()=>{const l=layers.find(x=>x.id===activeLayerId);if(!l)return;l.opacity=+layerOpSlider.value;layerOpVal.value=l.opacity+'%';const bm=document.querySelector('.layer-row.active .layer-blend-mode');if(bm)bm.textContent='Normal · '+l.opacity+'%';});
+bindTxt(layerOpVal,layerOpSlider,0,100,()=>{const l=layers.find(x=>x.id===activeLayerId);if(!l)return;l.opacity=+layerOpSlider.value;const bm=document.querySelector('.layer-row.active .layer-blend-mode');if(bm)bm.textContent='Normal · '+l.opacity+'%';});
+
+/* ══ PANEL TOGGLES ══ */
+const layerPanel=document.getElementById('layerPanel'),colorPanel=document.getElementById('rightPanel');
+let layerVisible=false,colorVisible=true;
+function toggleColorPanel(){colorVisible=!colorVisible;colorPanel.style.display=colorVisible?'flex':'none';document.getElementById('colorToggleBtn').classList.toggle('active',colorVisible);}
+function toggleLayerPanel(){
+  layerVisible=!layerVisible;
+  if(layerVisible){layerPanel.style.display='flex';if(!layerPanel._placed){const rp=colorPanel.getBoundingClientRect();layerPanel.style.right='20px';layerPanel.style.top=PANEL_TOP+'px';layerPanel._placed=true;}renderLayers();}
+  else layerPanel.style.display='none';
+  document.getElementById('layerToggleBtn').classList.toggle('active',layerVisible);
+}
+function togglePanel(id){const p=document.getElementById(id);if(p)p.style.display=p.style.display==='none'?'flex':'none';}
+
+/* ══ FOCUS MODE ══ */
+function toggleFocusMode(){document.body.classList.toggle('focus-mode');}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Tab'&&!e.target.matches('input,textarea,[contenteditable]')){e.preventDefault();toggleFocusMode();}
+  if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();openSearch();}
+});
+
+/* ══ VIEW ══ */
+let bwOn=false;
+function toggleBW(item){bwOn=!bwOn;item.style.color=bwOn?'var(--text-1)':'';const f=bwOn?'grayscale(1)':'none';canvas.style.filter=f;noiseEl.style.filter=f;}
+let timelapseOn=false;
+function toggleTimelapse(){timelapseOn=!timelapseOn;const el=document.getElementById('timelapseToggle');el.querySelector('span').textContent=timelapseOn?'Stop Recording':'Record Timelapse';el.style.color=timelapseOn?'rgba(255,100,100,0.9)':'';}
+
+/* ══ QUICK SEARCH ══ */
+const SEARCH_ITEMS=[
+  {name:'Brush',sc:'B'},{name:'Eraser',sc:'E'},{name:'Smudge',sc:'W'},{name:'Fill',sc:'G'},
+  {name:'Selection',sc:'M'},{name:'Transform',sc:'T'},{name:'Eyedropper',sc:'I'},
+  {name:'New',sc:'⌘N'},{name:'Open',sc:'⌘O'},{name:'Save',sc:'⌘S'},{name:'Export',sc:'⇧⌘E'},
+  {name:'Undo',sc:'⌘Z'},{name:'Redo',sc:'⇧⌘Z'},{name:'Select All',sc:'⌘A'},{name:'Deselect',sc:'⌘D'},
+  {name:'Zoom In',sc:'⌘+'},{name:'Zoom Out',sc:'⌘−'},{name:'Fit to Screen',sc:'⌘0'},
+  {name:'Focus Mode',sc:'Tab'},{name:'Quick Search',sc:'⌘K'},{name:'Preferences',sc:'⌘,'},
+  {name:'Hue / Saturation',sc:'⌘U'},{name:'RGB Curves',sc:'⌘M'},{name:'Gaussian Blur',sc:''},
+  {name:'New Layer',sc:''},{name:'Delete Layer',sc:''},{name:'Resize Canvas',sc:'⌥⌘C'},
+];
+function openSearch(){document.getElementById('searchOverlay').classList.add('open');setTimeout(()=>document.getElementById('searchInput').focus(),80);filterSearch('');}
+function closeSearch(e){if(e.target===document.getElementById('searchOverlay'))document.getElementById('searchOverlay').classList.remove('open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.getElementById('searchOverlay').classList.remove('open');}});
+function filterSearch(q){
+  const res=document.getElementById('searchResults');
+  const items=q?SEARCH_ITEMS.filter(i=>i.name.toLowerCase().includes(q.toLowerCase())):SEARCH_ITEMS.slice(0,14);
+  if(!items.length){res.innerHTML='<div class="search-empty">No results</div>';return;}
+  res.innerHTML=items.map(i=>`<div class="search-result-item"><span>${i.name}</span>${i.sc?`<kbd class="search-result-kbd">${i.sc}</kbd>`:''}</div>`).join('');
+}
+
+/* ══ DRAGGABLE — full panel surface, skip interactive elements ══ */
+let globalResizing=false; // set true during any resize, prevent drag from firing
+
+const INTERACTIVE='button,input,select,textarea,[contenteditable],a,.layer-drag-handle';
+function makeDraggable(panel){
+  let ox=0,oy=0,drag=false;
+  panel.addEventListener('mousedown',e=>{
+    if(globalResizing)return;
+    if(e.target.closest(INTERACTIVE))return;
+    drag=true;
+    const r=panel.getBoundingClientRect();ox=e.clientX-r.left;oy=e.clientY-r.top;
+    document.body.style.cursor='grabbing';e.preventDefault();
+  });
+  document.addEventListener('mousemove',e=>{
+    if(!drag)return;
+    const vw=window.innerWidth,vh=window.innerHeight,pw=panel.offsetWidth,ph=panel.offsetHeight;
+    panel.style.left=Math.max(0,Math.min(vw-pw,e.clientX-ox))+'px';
+    panel.style.top=Math.max(PANEL_TOP,Math.min(vh-ph,e.clientY-oy))+'px';
+    panel.style.right='auto';panel.style.transform='none';
+  });
+  document.addEventListener('mouseup',()=>{if(drag){drag=false;document.body.style.cursor='';}});
+}
+
+/* ══ ALL-EDGE RESIZE — sets globalResizing to prevent accidental drag ══ */
+function addResizeHandles(panel,opts={}){
+  const minW=opts.minW||80,minH=opts.minH||60,T=7;
+  [{d:'n',s:`top:0;left:${T*2}px;right:${T*2}px;height:${T}px;cursor:n-resize;`},{d:'s',s:`bottom:0;left:${T*2}px;right:${T*2}px;height:${T}px;cursor:s-resize;`},{d:'e',s:`top:${T*2}px;right:0;bottom:${T*2}px;width:${T}px;cursor:e-resize;`},{d:'w',s:`top:${T*2}px;left:0;bottom:${T*2}px;width:${T}px;cursor:w-resize;`},{d:'ne',s:`top:0;right:0;width:${T*2}px;height:${T*2}px;cursor:ne-resize;`},{d:'nw',s:`top:0;left:0;width:${T*2}px;height:${T*2}px;cursor:nw-resize;`},{d:'se',s:`bottom:0;right:0;width:${T*2}px;height:${T*2}px;cursor:se-resize;`},{d:'sw',s:`bottom:0;left:0;width:${T*2}px;height:${T*2}px;cursor:sw-resize;`}].forEach(({d,s})=>{
+    const h=document.createElement('div');h.style.cssText='position:absolute;z-index:30;'+s;panel.appendChild(h);
+    h.addEventListener('mousedown',e=>{
+      e.preventDefault();e.stopPropagation();
+      globalResizing=true;
+      const sx=e.clientX,sy=e.clientY,sw=panel.offsetWidth,sh=panel.offsetHeight,rect=panel.getBoundingClientRect(),sl=rect.left,st=rect.top;
+      document.body.style.cursor=h.style.cursor;
+      const onMove=e=>{
+        const dx=e.clientX-sx,dy=e.clientY-sy,vw=window.innerWidth,vh=window.innerHeight;
+        if(d.includes('e'))panel.style.width=Math.max(minW,Math.min(vw-sl,sw+dx))+'px';
+        if(d.includes('s'))panel.style.height=Math.max(minH,Math.min(vh-st,sh+dy))+'px';
+        if(d.includes('w')){const nw=Math.max(minW,sw-dx),nl=sl+sw-nw;if(nl>=0){panel.style.width=nw+'px';panel.style.left=nl+'px';panel.style.right='auto';}}
+        if(d.includes('n')){const nh=Math.max(minH,sh-dy),nt=st+sh-nh;if(nt>=PANEL_TOP){panel.style.height=nh+'px';panel.style.top=nt+'px';}}
+      };
+      const onUp=()=>{document.body.style.cursor='';globalResizing=false;document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
+      document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
+    });
+  });
+}
+
+/* ══ INIT ══ */
+sizeCanvas();updateBrush();
+state.r=0;state.g=120;state.b=255;const h0=rgbToHsv(0,120,255);state.h=h0.h;state.s=h0.s;state.v=h0.v;
+syncAll();applyColorMode();
+
+const PANELS=['leftPanel','rightPanel','layerPanel','brushSettingsPanel','prefsPanel','exportPanel'];
+PANELS.forEach(id=>{
+  const p=document.getElementById(id);
+  makeDraggable(p);
+  addResizeHandles(p,{minW:60,minH:80});
+});
+// effect panels made draggable when opened
+</script>
+</body>
+</html>

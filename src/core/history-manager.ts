@@ -1,5 +1,3 @@
-import type { BrushBlendMode } from '../renderer/brush-descriptor';
-
 export type SelectionOperation = 'rect' | 'lasso' | 'selectAll' | 'deselect' | 'invertSelection';
 
 export type Command =
@@ -7,48 +5,71 @@ export type Command =
         type:           'stroke';
         label:          'Brush Stroke';
         layerIndex:     number;
-        stamps:         Float32Array;
-        blendMode:      BrushBlendMode;
-        floatsPerStamp: number;
+        beforePixels:   Uint8Array;   // packed RGBA full-layer snapshot before stroke
+        afterPixels:    Uint8Array;   // packed RGBA full-layer snapshot after stroke
         timestamp:      number;
       }
     | { type: 'add-layer';    label: 'Add Layer' | 'Initial Layer'; layerIndex: number; timestamp: number; }
     | { type: 'delete-layer'; label: 'Delete Layer';                layerIndex: number; timestamp: number; }
     | {
-        type:      'selection';
-        label:     'Selection';
-        operation: SelectionOperation;
-        selMode:   string;
-        x?:        number;
-        y?:        number;
-        w?:        number;
-        h?:        number;
-        points?:   number[];
-        timestamp: number;
+        type:       'selection';
+        label:      'Selection';
+        operation:  SelectionOperation;  // kept for display/logging only
+        beforeMask: Uint8Array | null;   // null = no selection; R8 mask data (w×h bytes)
+        afterMask:  Uint8Array | null;
+        maskWidth:  number;
+        maskHeight: number;
+        timestamp:  number;
       }
     | {
-        type:       'cut';
-        label:      'Cut';
-        layerIndex: number;
-        pixels:     Uint8Array;   // full layer RGBA after cut (masked region zeroed)
-        timestamp:  number;
+        type:         'cut';
+        label:        'Cut';
+        layerIndex:   number;
+        beforePixels: Uint8Array;
+        afterPixels:  Uint8Array;
+        timestamp:    number;
       }
     | {
         type:      'paste';
         label:     'Paste';
-        pixels:    Uint8Array;   // full layer RGBA for the new pasted layer
+        pixels:    Uint8Array;   // pasted layer RGBA (for redo/replay)
         timestamp: number;
+      }
+    | {
+        type:         'smudge';
+        label:        'Smudge Stroke';
+        layerIndex:   number;
+        beforePixels: Uint8Array;
+        afterPixels:  Uint8Array;
+        timestamp:    number;
+      }
+    | {
+        type:         'transform';
+        label:        'Transform';
+        layerIndex:   number;
+        beforePixels: Uint8Array;
+        afterPixels:  Uint8Array;
+        timestamp:    number;
       };
 
-const MAX_HISTORY_COUNT   = 200;
-const MAX_HISTORY_BYTES   = 128 * 1024 * 1024;
+const MAX_HISTORY_COUNT = 200;
+const MAX_HISTORY_BYTES = 256 * 1024 * 1024; // 256 MB — before+after pixels use more than stamps
 const CHECKPOINT_INTERVAL = 10;
 
 function commandBytes(cmd: Command): number {
-    if (cmd.type === 'stroke') return cmd.stamps.byteLength;
-    if (cmd.type === 'cut')    return cmd.pixels.byteLength;
-    if (cmd.type === 'paste')  return cmd.pixels.byteLength;
+    if (cmd.type === 'stroke')    return cmd.beforePixels.byteLength + cmd.afterPixels.byteLength;
+    if (cmd.type === 'smudge')    return cmd.beforePixels.byteLength + cmd.afterPixels.byteLength;
+    if (cmd.type === 'cut')       return cmd.beforePixels.byteLength + cmd.afterPixels.byteLength;
+    if (cmd.type === 'transform') return cmd.beforePixels.byteLength + cmd.afterPixels.byteLength;
+    if (cmd.type === 'paste')   return cmd.pixels.byteLength;
+    if (cmd.type === 'selection') return (cmd.beforeMask?.byteLength ?? 0) + (cmd.afterMask?.byteLength ?? 0);
     return 0;
+}
+
+/** True for commands with direct before/after state — no full replay needed. */
+function supportsDirectUndoRedo(cmd: Command): boolean {
+    return cmd.type === 'stroke' || cmd.type === 'smudge' || cmd.type === 'cut' ||
+           cmd.type === 'selection' || cmd.type === 'transform';
 }
 
 export interface HistoryManagerOptions {
@@ -67,9 +88,11 @@ export class HistoryManager {
     private sessionStartTime: number    = performance.now();
 
     constructor(
-        private onNewCommand: (cmd: Command) => Promise<void>,
-        private onReplay:     (log: Command[]) => Promise<void>,
-        private options:      HistoryManagerOptions = {}
+        private onNewCommand:  (cmd: Command) => Promise<void>,
+        private onReplay:      (log: Command[]) => Promise<void>,
+        private onDirectUndo:  (cmd: Command) => Promise<void>,
+        private onDirectRedo:  (cmd: Command) => Promise<void>,
+        private options:       HistoryManagerOptions = {}
     ) {}
 
     /** ms since session start — stamp every outgoing command with this. */
@@ -111,7 +134,11 @@ export class HistoryManager {
         this.totalBytes -= commandBytes(cmd);
         this.redoStack.push(cmd);
         this.options.onCommandUndone?.();
-        await this.onReplay(this.undoStack);
+        if (supportsDirectUndoRedo(cmd)) {
+            await this.onDirectUndo(cmd);
+        } else {
+            await this.onReplay(this.undoStack);
+        }
     }
 
     public async redo(): Promise<void> {
@@ -120,13 +147,16 @@ export class HistoryManager {
         this.undoStack.push(cmd);
         this.totalBytes += commandBytes(cmd);
         this.options.onCommandRedone?.();
-        await this.onReplay(this.undoStack);
+        if (supportsDirectUndoRedo(cmd)) {
+            await this.onDirectRedo(cmd);
+        } else {
+            await this.onReplay(this.undoStack);
+        }
     }
 
-    /** Rebuilds the undo stack from persisted data without firing hooks.
-     *  Patches missing timestamp fields to 0 for backward compatibility. */
+    /** Rebuilds the undo stack from persisted data without firing hooks. */
     public restoreUndoStack(commands: Command[]): void {
-        this.undoStack  = commands.map(c => ('timestamp' in c ? c : { ...c, timestamp: 0 }) as Command);
+        this.undoStack  = commands.map(c => ('timestamp' in c ? c : { ...(c as object), timestamp: 0 }) as Command);
         this.redoStack  = [];
         this.totalBytes = commands.reduce((s, c) => s + commandBytes(c), 0);
     }

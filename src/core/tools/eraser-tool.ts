@@ -31,4 +31,14 @@ export class EraserTool extends BaseTool {
         this._descriptor.hardness = Math.max(0, Math.min(1, hardness));
         this.pushDescriptor();
     }
+
+    public setOpacity(opacity: number): void {
+        this._descriptor.opacity = Math.max(0, Math.min(1, opacity));
+        this.pushDescriptor();
+    }
+
+    public setSpacing(spacing: number): void {
+        this._descriptor.spacing = Math.max(0.01, spacing);
+        this.pushDescriptor();
+    }
 }

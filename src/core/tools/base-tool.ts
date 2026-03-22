@@ -16,14 +16,16 @@ export abstract class BaseTool implements Tool {
         | ((stamps: Float32Array, layerIndex: number, blendMode: BrushBlendMode) => void)
         | null = null;
 
-    // ── Straight line state (B8) ──────────────────────────────────────────────
-    // When Shift is held at pointerDown, we don't start the stroke worker.
-    // Instead we record the start point and show a live preview via getPrediction().
-    // On pointerUp we commit the line as a real 2-point stroke.
+    // ── Straight line state (Photoshop-style) ────────────────────────────────
+    // Shift+click: draws a line from the last pen-up position to the new click.
+    // Shift+drag:  constrains the line to the nearest 45° angle (H, V, diagonal).
+    // lastPenUpPos persists across strokes so consecutive Shift+clicks form
+    // connected segments (same behaviour as Photoshop).
     private shiftDown      = false;
     private shiftStart:    { x: number; y: number; pressure: number } | null = null;
     private currentPos:    { x: number; y: number; pressure: number } = { x: 0, y: 0, pressure: 1 };
-    private straightActive = false; // true while a shift-line gesture is in progress
+    private straightActive = false;
+    private lastPenUpPos:  { x: number; y: number; pressure: number } | null = null;
 
     constructor() {
         window.addEventListener('keydown', (e) => {
@@ -45,6 +47,11 @@ export abstract class BaseTool implements Tool {
     protected onAfterStroke(_pipeline: PaintPipeline):  void {}
     protected onResetRenderer(_pipeline: PaintPipeline): void {}
 
+    /** Override in subclasses to route stamps to a different renderer. */
+    protected drawToLayer(stamps: Float32Array, pipeline: PaintPipeline): void {
+        pipeline.draw(stamps);
+    }
+
     public abstract getDescriptor(): BrushDescriptor;
 
     public get blendMode(): BrushBlendMode { return this.getDescriptor().blendMode; }
@@ -64,14 +71,20 @@ export abstract class BaseTool implements Tool {
 
     public getPrediction(): Float32Array {
         if (this.straightActive && this.shiftStart) {
-            // Generate preview stamps from shiftStart → currentPos at half opacity
+            // Preview: line from shiftStart (= last pen-up) to constrained current pos
+            const end = this.constrainTo45(
+                this.shiftStart.x, this.shiftStart.y,
+                this.currentPos.x, this.currentPos.y
+            );
             return this.generateLineStamps(
                 this.shiftStart.x,  this.shiftStart.y,  this.shiftStart.pressure,
-                this.currentPos.x,  this.currentPos.y,  this.currentPos.pressure,
-                0.5 // preview opacity multiplier
+                end.x,              end.y,               this.currentPos.pressure,
+                0.5 // half opacity for the ghost preview
             );
         }
-        return this.strokeEngine.getPredictedStamps();
+        // During normal strokes, don't show prediction — it overlaps committed
+        // stamps and causes a transparency mismatch before vs after release.
+        return new Float32Array();
     }
 
     // ── Pointer events ────────────────────────────────────────────────────────
@@ -86,8 +99,10 @@ export abstract class BaseTool implements Tool {
         this.onBeforeStroke(pipeline);
 
         if (this.shiftDown) {
-            // Start a straight-line gesture — record start, don't begin worker stroke
-            this.shiftStart    = { x, y, pressure };
+            // Straight-line gesture: start from the last pen-up position so that
+            // Shift+click behaves like Photoshop (line from previous endpoint).
+            // Fall back to the current pointer position on the very first stroke.
+            this.shiftStart     = this.lastPenUpPos ?? { x, y, pressure };
             this.straightActive = true;
             return;
         }
@@ -126,17 +141,27 @@ export abstract class BaseTool implements Tool {
             this.chunks         = [];
             this.stampCount     = 0;
 
-            // Use worker for the actual line (gets pressure curve + dynamics)
+            // Apply 45° constraint: snap to nearest horizontal, vertical, or diagonal
+            const end = this.constrainTo45(start.x, start.y, x, y);
+
+            // Use worker so the line gets pressure dynamics + pressure curve.
+            // The Catmull-Rom spline needs 4 points to emit a segment: buffer starts
+            // as [A,A,A] after beginStroke, so one addPoint gives [A,A,A,B] and
+            // stamps the A→A segment (zero length). A second addPoint gives [A,A,A,B,B]
+            // and stamps the A→B segment — which is the line we want.
             this.strokeEngine.beginStroke(start.x, start.y, start.pressure);
-            this.strokeEngine.addPoint(x, y, pressure);
+            this.strokeEngine.addPoint(end.x, end.y, pressure);
+            this.strokeEngine.addPoint(end.x, end.y, pressure); // forces A→B segment
             const stamps = await this.strokeEngine.endStrokeAndFlush();
 
             if (stamps.length > 0) {
-                pipeline.draw(stamps);
+                this.drawToLayer(stamps, pipeline);
                 this.onAfterStroke(pipeline);
+                this.lastPenUpPos = { x: end.x, y: end.y, pressure };
                 return stamps;
             }
             this.onAfterStroke(pipeline);
+            this.lastPenUpPos = { x: end.x, y: end.y, pressure };
             return null;
         }
 
@@ -145,12 +170,13 @@ export abstract class BaseTool implements Tool {
         const finalStamps = await this.strokeEngine.endStrokeAndFlush();
 
         if (finalStamps.length > 0) {
-            pipeline.draw(finalStamps);
+            this.drawToLayer(finalStamps, pipeline);
             this.chunks.push(finalStamps);
             this.stampCount += finalStamps.length / FLOATS_PER_STAMP;
         }
 
         this.onAfterStroke(pipeline);
+        this.lastPenUpPos = { x, y, pressure };
         return this.mergeAndReset();
     }
 
@@ -159,7 +185,7 @@ export abstract class BaseTool implements Tool {
 
         const stamps = this.strokeEngine.flush();
         if (stamps.length > 0) {
-            pipeline.draw(stamps);
+            this.drawToLayer(stamps, pipeline);
             this.chunks.push(stamps);
             this.stampCount += stamps.length / FLOATS_PER_STAMP;
             if (this.stampCount >= this.MAX_STAMPS) this.triggerPartialFlush(pipeline);
@@ -214,17 +240,33 @@ export abstract class BaseTool implements Tool {
             stamps[o+9]  = 0; // tiltY
             stamps[o+10] = d.opacity * d.flow * (1 - d.pressureOpacity * (1 - eff)) * opacityMultiplier;
             stamps[o+11] = angleRad;
+            stamps[o+12] = d.roundness; // roundness
+            stamps[o+13] = 1.0;         // grainDepthScale
+            // [o+14], [o+15] = 0 (pad — Float32Array is zero-initialised)
         }
 
         return stamps;
     }
 
+    /**
+     * Snaps the vector (sx,sy)→(ex,ey) to the nearest 45° angle.
+     * Returns the new endpoint (distance preserved, angle snapped).
+     */
+    private constrainTo45(sx: number, sy: number, ex: number, ey: number): { x: number; y: number } {
+        const dx = ex - sx, dy = ey - sy;
+        if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return { x: ex, y: ey };
+        const len     = Math.sqrt(dx * dx + dy * dy);
+        const angle   = Math.atan2(dy, dx);
+        const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+        return { x: sx + len * Math.cos(snapped), y: sy + len * Math.sin(snapped) };
+    }
+
     private triggerPartialFlush(pipeline: PaintPipeline): void {
-        if (this.chunks.length === 0) return;
+        if (this.chunks.length === 0 || !this.onPartialFlush) return;
         const merged    = this.merge(this.chunks);
         this.chunks     = [];
         this.stampCount = 0;
-        this.onPartialFlush?.(merged, pipeline.activeLayerIndex, this.blendMode);
+        this.onPartialFlush(merged, pipeline.activeLayerIndex, this.blendMode);
     }
 
     private mergeAndReset(): Float32Array | null {

@@ -4,6 +4,7 @@ import { NavigationManager }                       from '../input/navigation';
 import { setupPointer }                            from '../input/pointer';
 import { Tool }                                    from './tool';
 import { BrushTool }                               from './tools/brush-tool';
+import { BrushToolB }                              from './tools/brush-tool-b';
 import { EraserTool }                              from './tools/eraser-tool';
 import { EyedropperTool }                          from './tools/eyedropper-tool';
 import { FillTool }                                from './tools/fill-tool';
@@ -33,6 +34,8 @@ export class PaintApp {
 
     private _activeTool:    Tool;
     public  brushTool:      BrushTool;
+    public  brushToolB:     BrushToolB;
+    public  brushEngine:    'a' | 'b' = 'a';
     public  eraserTool:     EraserTool;
     public  smudgeTool:     SmudgeTool;
     public  eyedropperTool: EyedropperTool;
@@ -95,6 +98,7 @@ export class PaintApp {
         );
 
         this.brushTool      = new BrushTool();
+        this.brushToolB     = new BrushToolB();
         this.eraserTool     = new EraserTool();
         this.smudgeTool     = new SmudgeTool();
         this.eyedropperTool = new EyedropperTool(this.pipeline, this.bus);
@@ -149,8 +153,18 @@ export class PaintApp {
     }
 
     // Expose active tool name for bus sync
-    public get activeToolName(): string { return this._activeTool.constructor.name; }
-    public get activeTool():     Tool   { return this._activeTool; }
+    public get activeToolName():    string    { return this._activeTool.constructor.name; }
+    public get activeTool():        Tool      { return this._activeTool; }
+    public get activeBrushTool():   BrushTool { return this.brushEngine === 'b' ? this.brushToolB : this.brushTool; }
+
+    public setBrushEngine(engine: 'a' | 'b'): void {
+        this.brushEngine = engine;
+        // Propagate current color and pressure LUT to the newly-active engine tool
+        const from = engine === 'b' ? this.brushTool : this.brushToolB;
+        const to   = engine === 'b' ? this.brushToolB : this.brushTool;
+        to.setColor(...from.getCurrentColor());
+        this.bus.emit('brush:engine', { engine });
+    }
 
     // ── Brush cursor ──────────────────────────────────────────────────────────
 
@@ -256,7 +270,7 @@ export class PaintApp {
         this._activeTool = tool;
         this.bus.emit('tool:change', { tool: tool.constructor.name });
 
-        const isBrushLike = tool === this.brushTool || tool === this.eraserTool || tool === this.smudgeTool;
+        const isBrushLike = tool === this.brushTool || tool === this.brushToolB || tool === this.eraserTool || tool === this.smudgeTool;
         this.brushCursor?.setVisible(isBrushLike);
         this.canvas.style.cursor =
             isBrushLike                  ? 'none'
@@ -365,6 +379,7 @@ export class PaintApp {
                 this._hadSelectionAtPointerDown = this.pipeline.selectionManager.hasMask;
                 // Capture layer state before any painting begins (for pixel-based undo)
                 const isPaintingTool = this._activeTool === this.brushTool ||
+                                       this._activeTool === this.brushToolB ||
                                        this._activeTool === this.eraserTool ||
                                        this._activeTool === this.smudgeTool;
                 if (isPaintingTool) {
@@ -375,8 +390,8 @@ export class PaintApp {
                         // Wet mixing: GPU-to-GPU copy of layer at stroke start.
                         // Must be synchronous so the pickup texture is ready before the
                         // first stamp is drawn. Do NOT use the async snapshotTexture path.
-                        if (this._activeTool === this.brushTool) {
-                            const wetness = this.brushTool.getDescriptor().wetness;
+                        if (this._activeTool === this.brushTool || this._activeTool === this.brushToolB) {
+                            const wetness = (this._activeTool as BrushTool).getDescriptor().wetness;
                             if (wetness > 0) {
                                 this._pickupTexture?.destroy();
                                 this._pickupTexture = this.pipeline.device.createTexture({
@@ -502,16 +517,18 @@ export class PaintApp {
 
     public setBrushSize(size: number): void {
         this.brushTool.setSize(size);
+        this.brushToolB.setSize(size);
         this.smudgeTool.setSize(size);
         this.pipeline.updateUniforms(this.canvas.width, this.canvas.height, size);
         this.brushCursor?.setSize(size);
-        this.bus.emit('brush:change', { size, color: Array.from(this.brushTool.getCurrentColor()) });
+        this.bus.emit('brush:change', { size, color: Array.from(this.activeBrushTool.getCurrentColor()) });
     }
 
     public setBrushColor(r: number, g: number, b: number, a = 1.0): void {
         this.brushTool.setColor(r, g, b, a);
+        this.brushToolB.setColor(r, g, b, a);
         this.pipeline.currentFillColor = [Math.round(r*255), Math.round(g*255), Math.round(b*255), Math.round(a*255)];
-        this.bus.emit('brush:change', { size: this.brushTool.getDescriptor().size, color: [r, g, b, a] });
+        this.bus.emit('brush:change', { size: this.activeBrushTool.getDescriptor().size, color: [r, g, b, a] });
     }
 
     public setBrushOpacity(opacity: number): void   { this.brushTool.setOpacity(opacity); }

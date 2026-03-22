@@ -131,20 +131,30 @@ It scales internally: `px = round(x * maskWidth)`.
 
 ## Command History Types
 
+**Architecture: pixel-based direct undo/redo.** All pixel-changing operations store `beforePixels`/`afterPixels` (packed full-layer RGBA `Uint8Array`). Undo/redo restores pixels directly — no replay needed. Structural commands (`add-layer`, `delete-layer`, `paste`) still use `reconstructFromHistory`.
+
 ```typescript
 type Command =
-  | { type: 'stroke';     layerIndex, stamps, blendMode, floatsPerStamp, timestamp }
-  | { type: 'add-layer';  layerIndex, timestamp }
+  | { type: 'stroke';    layerIndex, beforePixels, afterPixels, timestamp }
+  | { type: 'smudge';   layerIndex, beforePixels, afterPixels, timestamp }
+  | { type: 'cut';      layerIndex, beforePixels, afterPixels, timestamp }
+  | { type: 'selection'; operation, beforeMask, afterMask, maskWidth, maskHeight, timestamp }
+  | { type: 'add-layer';    layerIndex, timestamp }
   | { type: 'delete-layer'; layerIndex, timestamp }
-  | { type: 'selection';  operation, selMode, x?, y?, w?, h?, points?, timestamp }
+  | { type: 'paste';   pixels, timestamp }
 
 type SelectionOperation = 'rect' | 'lasso' | 'selectAll' | 'deselect' | 'invertSelection'
 ```
 
 **History rules:**
 - `canUndo()` returns true when `undoStack.length > 1` (first command is "Initial Layer")
-- Max 200 commands OR 128MB stamp data — oldest dropped when exceeded
-- Checkpoint every 10 commands
+- Max 200 commands OR 256MB pixel data — oldest dropped when exceeded
+- Checkpoint every 10 commands (used only for session restore / structural command replay)
+- `HistoryManager` constructor: `(onNewCommand, onReplay, onDirectUndo, onDirectRedo, options)`
+- Direct undo/redo path: `stroke`, `smudge`, `cut`, `selection` — calls `pipeline.directUndoCommand/directRedoCommand`
+- Replay path: `add-layer`, `delete-layer`, `paste` — calls `pipeline.reconstructFromHistory`
+
+**`pipeline.hadPaintingSinceReset`** — flag set by `draw()`/`drawSmudge()`, reset by `resetPaintingFlag()`. Used in `app.ts` pointerUp to decide whether to push to history.
 
 ---
 
@@ -153,18 +163,21 @@ type SelectionOperation = 'rect' | 'lasso' | 'selectAll' | 'deselect' | 'invertS
 Selection is **undoable**.
 
 **Flow for new selections:**
-1. `SelectionTool` calls `pipeline.setRectSelection()` directly (immediate visual feedback)
-2. `SelectionTool` fires `onSelectionMade` callback
-3. `app.ts` wires callback → `history.execute({ type: 'selection', ... })`
-4. `pipeline.applyCommand` for `'selection'` type: **skips apply** (already done), just marks dirty
-5. `pipeline.replayCommand` for `'selection'` type: calls `applySelectionCommand()` (for undo/redo replay)
+1. `app.ts` pointerDown: `_selectionBeforeMask = selectionManager.getMaskSnapshot()` (before state)
+2. `SelectionTool` calls `pipeline.setRectSelection()` directly (immediate visual feedback)
+3. `SelectionTool` fires `onSelectionMade` callback
+4. `app.ts`: captures `afterSnapshot = selectionManager.getMaskSnapshot()`, pushes `{ type:'selection', beforeMask, afterMask }` to history
+5. `pipeline.applyCommand` for `'selection'`: no-op (already applied), marks dirty only
 
-**Undo/redo replay:**
-- `reconstructFromHistory` calls `brushRenderer.setMaskTexture(null)` BEFORE replay loop
-- Calls `syncMask()` AFTER all commands replayed
-- This ensures old strokes are not clipped by selections made after them
+**Undo/redo:**
+- **Direct path** (most operations): `pipeline.directUndoCommand` restores `beforeMask` via `selectionManager.restoreFromSnapshot()` + `syncMask()`
+- **Replay path** (session restore / structural): `replayCommand` for selection restores `afterMask` + calls `syncMask()`. `reconstructFromHistory` clears selection state first, then replays ALL selection commands in sequence.
 
-**Selection state is ephemeral in GPU** — lives in `SelectionManager.maskData` (CPU `Uint8Array`) + `maskTexture` (R8Unorm GPU texture). Not saved to `.gpaint`.
+**Selection state is ephemeral in GPU** — lives in `SelectionManager.maskData` (CPU `Uint8Array`) + `maskTexture` (R8Unorm GPU texture). Saved to autosave (IDB) via `beforeBuffer`/`afterBuffer` in `StoredCommandRecord`. NOT saved to `.gpaint`.
+
+**`SelectionManager` new methods:**
+- `getMaskSnapshot()` → `{ data: Uint8Array; hasMask: boolean }` — returns a copy
+- `restoreFromSnapshot({ data, hasMask })` — restores CPU data + uploads to GPU
 
 **`onSelectionMade` contract:**
 ```typescript
@@ -179,6 +192,63 @@ For deselect (tap with no drag): fires with `{ operation:'rect', selMode:'replac
 App.ts detects this as deselect when `op.w < 0.001`.
 
 `app.selectAll()`, `app.deselect()`, `app.invertSelection()` — bypass the tool and push directly to history. Use from menu/keyboard, not `pipeline.*`.
+
+---
+
+## Transform Architecture (C4)
+
+### State
+```typescript
+interface TransformState { cx, cy, scaleX, scaleY, rotation }
+// cx/cy = normalized canvas center (0..1)
+// scaleX/scaleY = content size in normalized canvas units (1.0 = full canvas width/height)
+// rotation = degrees clockwise
+```
+
+### GPU pipeline (transform-pipeline.ts)
+- Shader: `src/renderer/shaders/transform-preview.wgsl`
+- Inverse affine matrix: maps destination UV → source UV (2 vec4 rows)
+- Source texture: original pixels (not scaled) — shader handles the UV remapping
+- Preview texture: result of inverse-affine sample, used in composite
+
+### PaintPipeline transform methods
+```typescript
+pipeline.beginTransform(sourcePixels, initialState)   // enters transform mode
+pipeline.updateTransform(state)                        // re-renders preview (call on each drag)
+pipeline.commitTransform()                             // copies preview → layer, returns afterPixels
+pipeline.cancelTransform(sourcePixels)                 // restores original pixels
+pipeline.transformActive: boolean                      // read-only
+```
+
+### Composite override
+When `transformActive`, `composite()` passes `{ layerIndex, texture: transformPreviewTex }` to `compositeRenderer.render()`. The composite renders the preview texture instead of the layer texture for that slot.
+
+### TransformTool handle geometry
+- Handles at corners/edges/rotation at `(cx ± scaleX/2, cy ± scaleY/2)` in local space, then rotated
+- Corner scale: opposite corner stays fixed, new center = midpoint of fixed + dragged
+- Edge scale: only one axis changes, project pointer to local axis
+- Rotate: angle delta from center
+- Shift on corner drag = aspect ratio lock
+
+### Image Import (D7)
+`app.importImage(file)`:
+1. `createImageBitmap(file)` → compute fit-to-canvas scale
+2. Create OffscreenCanvas, `drawImage` stretched to canvasW×canvasH (fills UV 0..1)
+3. `copyExternalImageToTexture` → new layer
+4. `app.enterTransform(srcPixels, { cx:0.5, cy:0.5, scaleX:dw/canvasW, scaleY:dh/canvasH })`
+
+### History
+- Transform committed → pushed as `{ type:'transform', layerIndex, beforePixels, afterPixels }`
+- Undo/redo: same `directUndoCommand`/`directRedoCommand` path as 'stroke'
+- Cancel → no history entry, original pixels restored
+
+### UX
+- T key → enter transform on active layer
+- Enter or double-click → commit
+- Escape → cancel
+- Ctrl+I / File→Import Image → import and auto-enter transform
+- Drag-drop image file → import and auto-enter transform
+- Shift drag corner → aspect ratio lock
 
 ---
 
@@ -569,6 +639,10 @@ Font: `'DM Sans'` (UI), `'DM Mono'` (values). Loaded from Google Fonts.
 
 12. **`SelectionMode` Vite ESM error**: Must export as `const` object, not type-only alias: `export const SelectionMode = { replace: 'replace', ... } as const`.
 
+13. **Stamp-based undo changes stroke appearance**: Brush `hardness` (and other GPU renderer state) is NOT stored in stamps, so replaying stamps produces different pixels if hardness changed. Fix: all pixel-changing commands now store `beforePixels`/`afterPixels` (full layer snapshots). Undo/redo directly restores pixels — no replay, no mask/state dependencies.
+
+14. **Selection undo/redo broken after checkpoint**: `reconstructFromHistory` with checkpoint path skipped selection commands at index < checkpoint. Fix: selection commands are always replayed in order during reconstruction; pixel commands at index < checkpoint are skipped (pixels baked in checkpoint).
+
 ---
 
 ## Completed Tiers
@@ -584,8 +658,8 @@ Key completed items: Worker stroke processing, checkpoint undo, IndexedDB autosa
 ### Tier C — Advanced tools
 | Item | Description |
 |------|-------------|
-| C1 | Smudge tool (new WGSL shader needed) |
-| C4 | Layer transform / free transform |
+| C1 | Smudge tool ✓ DONE — `SmudgeRenderer`, `smudge.wgsl`, `SmudgeTool` |
+| C4 | Layer transform / free transform ✓ DONE — `TransformPipeline`, `TransformTool`, `TransformOverlay` |
 | C5 | Copy/cut/paste selection |
 | C7/C8 | Advanced brush dynamics (opacity jitter, color jitter, dual brush) |
 | C9 | Brush panel + presets |
@@ -597,7 +671,7 @@ Key completed items: Worker stroke processing, checkpoint undo, IndexedDB autosa
 | D2 | Noise (CPU per-pixel random) |
 | D4 | Color Balance (shadow/mid/highlight) |
 | D5 | Brightness/Contrast |
-| D7 | Import image / camera (`copyExternalImageToTexture`) |
+| D7 | Import image / camera (`copyExternalImageToTexture`) ✓ DONE — `app.importImage()`, drag-drop image files, Ctrl+I, File→Import Image |
 | D8 | Timelapse recorder (`TimestampedCommand` data captured, needs `VideoEncoder`) |
 | D9 | JPG export (PNG done; JPG via Canvas2D `toBlob`) |
 

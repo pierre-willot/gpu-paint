@@ -3,14 +3,22 @@ import type { BrushBlendMode } from './brush-descriptor';
 
 export type { BrushBlendMode };
 
-// ── Stamp layout — 12 floats = 48 bytes ───────────────────────────────────────
-// [x, y, pressure, size, r, g, b, a, tiltX, tiltY, opacity, stampAngle]
-export const FLOATS_PER_STAMP = 12;
-export const BYTES_PER_STAMP  = FLOATS_PER_STAMP * 4; // 48
+// ── Stamp layout — 16 floats = 64 bytes ───────────────────────────────────────
+// [x, y, pressure, size, r, g, b, a, tiltX, tiltY, opacity, stampAngle,
+//  roundness, grainDepthScale, _pad0, _pad1]
+export const FLOATS_PER_STAMP = 16;
+export const BYTES_PER_STAMP  = FLOATS_PER_STAMP * 4; // 64
 
 export interface BrushPipelineConfig {
-    blendMode: BrushBlendMode;
-    hardness?: number;
+    blendMode:       BrushBlendMode;
+    hardness?:       number;
+    grainDepth?:     number;
+    grainScale?:     number;
+    grainRotation?:  number;  // radians
+    grainContrast?:  number;
+    grainBrightness?: number;
+    grainBlendMode?: number;  // 0=multiply 1=screen 2=overlay 3=normal
+    grainStatic?:    boolean;
 }
 
 const BLEND_CONFIGS: Record<BrushBlendMode, GPUBlendState> = {
@@ -29,16 +37,18 @@ export class PipelineCache {
     private module: GPUShaderModule;
 
     // Explicit bind group layout so BrushRenderer can create bind groups
-    // independently of the pipeline (needed for the dummy-mask bind group).
+    // independently of the pipeline.
     public bindGroupLayout: GPUBindGroupLayout;
 
     constructor(private device: GPUDevice, private format: GPUTextureFormat) {
         this.module = device.createShaderModule({ code: brushShaderSource });
 
         // Bind group 0 layout:
-        //   binding 0 — uniform buffer  (resolution + hardness)
-        //   binding 1 — mask texture    (R8Unorm or R32Float when active, R8 dummy when not)
-        //   binding 2 — mask sampler    (nearest-neighbour)
+        //   binding 0 — uniform buffer (48 bytes: resolution, hardness, grain params)
+        //   binding 1 — mask texture   (R8Unorm selection mask)
+        //   binding 2 — mask sampler   (nearest-neighbour)
+        //   binding 3 — grain texture  (rgba8unorm, repeat)
+        //   binding 4 — grain sampler  (linear, repeat)
         this.bindGroupLayout = device.createBindGroupLayout({
             entries: [
                 {
@@ -55,6 +65,36 @@ export class PipelineCache {
                     binding:    2,
                     visibility: GPUShaderStage.FRAGMENT,
                     sampler:    { type: 'non-filtering' }
+                },
+                {
+                    binding:    3,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture:    { sampleType: 'float', viewDimension: '2d', multisampled: false }
+                },
+                {
+                    binding:    4,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    sampler:    { type: 'filtering' }
+                },
+                {
+                    binding:    5,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture:    { sampleType: 'float', viewDimension: '2d', multisampled: false }
+                },
+                {
+                    binding:    6,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    sampler:    { type: 'filtering' }
+                },
+                {
+                    binding:    7,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture:    { sampleType: 'float', viewDimension: '2d', multisampled: false }
+                },
+                {
+                    binding:    8,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    sampler:    { type: 'filtering' }
                 }
             ]
         });
@@ -89,6 +129,8 @@ export class PipelineCache {
                         { shaderLocation: 4, offset: 32, format: 'float32x2' }, // tiltX, tiltY
                         { shaderLocation: 5, offset: 40, format: 'float32'   }, // opacity
                         { shaderLocation: 6, offset: 44, format: 'float32'   }, // stampAngle
+                        { shaderLocation: 7, offset: 48, format: 'float32'   }, // roundness
+                        { shaderLocation: 8, offset: 52, format: 'float32'   }, // grainDepthScale
                     ]
                 }]
             },

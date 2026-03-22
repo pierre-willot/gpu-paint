@@ -1,4 +1,5 @@
 import type { BrushDescriptor } from './brush-descriptor';
+import { buildDynamicsLUTs }   from './dynamics-lut';
 
 export class WorkerBridge {
     private worker:        Worker;
@@ -71,6 +72,13 @@ export class WorkerBridge {
      */
     setDescriptor(descriptor: BrushDescriptor): void {
         this.worker.postMessage({ type: 'set_descriptor', descriptor });
+        // Auto-build and transfer dynamics LUTs so the worker has them in sync.
+        this.sendDynamicsLUTs(descriptor);
+    }
+
+    private sendDynamicsLUTs(d: BrushDescriptor): void {
+        const packed = buildDynamicsLUTs(d);
+        this.worker.postMessage({ type: 'set_dynamics_luts', packed }, [packed.buffer]);
     }
 
     setPressureLUT(lut: Float32Array): void {
