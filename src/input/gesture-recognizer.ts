@@ -113,20 +113,23 @@ export class GestureRecognizer {
         if (count === 2) {
             const [a, b] = this.getTwoPoints();
 
-            // Pan
+            // Current midpoint between the two fingers (screen clientX/Y)
             const midX = (a.x + b.x) / 2;
             const midY = (a.y + b.y) / 2;
+
+            // Pan — move canvas by how much the midpoint moved
             this.nav.pan(midX - this.prevMidX, midY - this.prevMidY);
 
-            // Zoom (pinch)
+            // Zoom (pinch) — zoom toward the midpoint between the two fingers,
+            // exactly like Procreate / Google Maps.
             const d = this.dist(a, b);
             if (this.prevDistance > 0) {
                 const factor = d / this.prevDistance;
-                this.nav.applyZoom(factor);
+                this.nav.applyZoomAt(factor, midX, midY);
             }
 
             // Rotate
-            const ang = this.angle(a, b);
+            const ang  = this.angle(a, b);
             const dAng = ang - this.prevAngle;
             // Only rotate if change is meaningful (avoids jitter)
             if (Math.abs(dAng) < 30) {

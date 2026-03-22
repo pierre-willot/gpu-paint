@@ -18,6 +18,8 @@ export class NavigationManager {
     private canvas:   HTMLCanvasElement;
     private onUpdate: () => void;
 
+    private static readonly HEADER_H = 52;
+
     constructor(canvas: HTMLCanvasElement, onUpdate: () => void) {
         this.canvas   = canvas;
         this.onUpdate = onUpdate;
@@ -55,10 +57,9 @@ export class NavigationManager {
      * Resets pan and rotation.
      */
     public fitToScreen(canvasLogicalW: number, canvasLogicalH: number): void {
-        const HEADER_H = 52;
         const padding  = 40;
         const availW   = window.innerWidth  - padding * 2;
-        const availH   = window.innerHeight - HEADER_H - padding * 2;
+        const availH   = window.innerHeight - NavigationManager.HEADER_H - padding * 2;
         const zoomX    = availW  / canvasLogicalW;
         const zoomY    = availH  / canvasLogicalH;
         this.state.zoom     = Math.min(zoomX, zoomY, 1.0);
@@ -84,8 +85,42 @@ export class NavigationManager {
         this.onUpdate();
     }
 
+    /**
+     * Zoom around the canvas center (used by keyboard shortcuts Ctrl+/Ctrl-).
+     * Does not adjust pan — the viewport center stays fixed.
+     */
     public applyZoom(factor: number): void {
         this.state.zoom = Math.max(0.1, Math.min(5.0, this.state.zoom * factor));
+        this.onUpdate();
+    }
+
+    /**
+     * Zoom toward an arbitrary focal point in screen coordinates (clientX/Y).
+     * Adjusts pan so the canvas point currently under focalX/focalY stays
+     * fixed on screen after the zoom — exactly like Procreate or Google Maps.
+     *
+     * Used by:
+     *   • Mouse wheel
+     *   • Trackpad pinch (Ctrl+wheel)
+     *   • Two-finger touch pinch (called from GestureRecognizer)
+     */
+    public applyZoomAt(factor: number, focalX: number, focalY: number): void {
+        const oldZoom = this.state.zoom;
+        const newZoom = Math.max(0.1, Math.min(5.0, oldZoom * factor));
+        const actual  = newZoom / oldZoom;   // real factor after clamping
+
+        // Current canvas center in screen space (mirrors updateCanvasTransform in app.ts)
+        const cx = window.innerWidth  / 2 + this.state.x;
+        const cy = NavigationManager.HEADER_H
+                 + (window.innerHeight - NavigationManager.HEADER_H) / 2
+                 + this.state.y;
+
+        // Shift pan so the focal point stays stationary on screen.
+        // Derivation: focalPoint_canvas must satisfy:
+        //   focalX = cx + (focalX - cx) * actual   →   Δpan = (focal - cx)(1 - actual)
+        this.state.x   += (focalX - cx) * (1 - actual);
+        this.state.y   += (focalY - cy) * (1 - actual);
+        this.state.zoom = newZoom;
         this.onUpdate();
     }
 
@@ -116,24 +151,28 @@ export class NavigationManager {
                 this.state.y += e.movementY;
                 this.onUpdate();
             }
-            // Scrubby zoom — Ctrl + Space + left drag
+            // Scrubby zoom — Ctrl + Space + left drag.
+            // Intentionally zooms around the canvas center (not the cursor):
+            // the cursor is held still and horizontal drag is the zoom lever.
             if (this.keys.Space && this.keys.Control && e.buttons === 1) {
                 this.state.zoom = Math.max(0.1, Math.min(5.0, this.state.zoom + e.movementX * 0.005));
                 this.onUpdate();
             }
         });
 
-        // Mouse wheel — zoom. Ctrl+wheel = trackpad pinch gesture.
+        // Mouse wheel — zoom toward cursor.
+        // Ctrl/Meta + wheel = trackpad pinch (browser remaps it to this).
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             if (e.ctrlKey || e.metaKey) {
-                // Trackpad pinch (browser sends Ctrl+wheel for pinch)
+                // Trackpad pinch — step factor keeps it feeling natural
                 const factor = e.deltaY > 0 ? 0.95 : 1.05;
-                this.state.zoom = Math.max(0.1, Math.min(5.0, this.state.zoom * factor));
+                this.applyZoomAt(factor, e.clientX, e.clientY);
             } else {
-                this.state.zoom = Math.max(0.1, Math.min(5.0, this.state.zoom - e.deltaY * 0.001));
+                // Mouse wheel — convert additive delta to multiplicative factor
+                const factor = 1 - e.deltaY * 0.001;
+                this.applyZoomAt(factor, e.clientX, e.clientY);
             }
-            this.onUpdate();
         }, { passive: false });
     }
 }
