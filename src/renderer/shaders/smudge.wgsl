@@ -3,32 +3,39 @@
 // Two GPU passes per stamp batch — both share this vertex shader:
 //
 //   fs_pickup  — reads carryTex (tex_a) + live layerTex (tex_b)
+//                → dilutes carry.a, then blends carry toward layer at charge × mask
 //                → writes updated carry to scratchTex (overwrite, no blend)
 //                → loadOp:'load' preserves non-stamp carry values
 //
 //   fs_deposit — reads scratchTex/new carry (tex_a) + selMask (tex_b)
-//                → blends carried color onto layer (premultiplied: one / one-minus-src-alpha)
+//                → blends carried color onto layer scaled by pull × dynstr × mask
 //
 // Stamp layout (48 bytes per instance) — identical to brush.wgsl.
+// color.z repurposed as dynstr (attack × grade, packed by SmudgeTool).
 
 const PI: f32 = 3.14159265358979;
 
 struct Uniforms {
     resolution: vec2<f32>,
     hardness:   f32,
-    strength:   f32,   // smudge pickup amount (0 = none, 1 = full)
+    charge:     f32,   // pickup absorption rate (0=carry unchanged, 1=fully absorbed)
+    pull:       f32,   // deposit blend weight  (0=nothing deposited, 1=carry replaces layer)
+    dilution:   f32,   // carry fade-out per stamp (0=persistent, 1=rapid fade)
+    _pad:       vec2<f32>,
 };
 
 struct VertexOut {
-    @builtin(position) clip_pos:   vec4<f32>,
-    @location(0)       uv:         vec2<f32>,
-    @location(1)       opacity:    f32,
-    @location(2)       radius_px:  f32,
-    @location(3)       tilt:       vec2<f32>,
-    @location(4)       angle:      f32,
-    // Normalized (0..1) position of the PREVIOUS stamp center.
+    @builtin(position) clip_pos:    vec4<f32>,
+    @location(0)       uv:          vec2<f32>,
+    @location(1)       opacity:     f32,
+    @location(2)       radius_px:   f32,
+    @location(3)       tilt:        vec2<f32>,
+    @location(4)       angle:       f32,
+    // Normalised (0..1) position of the PREVIOUS stamp center.
     // Carry is sampled here so colors are advected forward along the stroke.
     @location(5)       prev_center: vec2<f32>,
+    // Per-stamp dynamic strength: attack × grade, packed by SmudgeTool into color.z.
+    @location(6)       dynstr:      f32,
 };
 
 @group(0) @binding(0) var<uniform> u:       Uniforms;
@@ -43,8 +50,9 @@ fn vs_main(
     @location(0) pos:        vec2<f32>,
     @location(1) pressure:   f32,
     @location(2) size:       f32,
-    // color.xy repurposed as the PREVIOUS stamp's normalized (0..1) center.
-    // color.zw unused. Encoded by SmudgeTool.drawToLayer before submission.
+    // color.xy repurposed as the PREVIOUS stamp's normalised (0..1) center.
+    // color.z  repurposed as dynstr (attack × grade, packed by SmudgeTool).
+    // color.w  unused.
     @location(3) color:      vec4<f32>,
     @location(4) tilt:       vec2<f32>,
     @location(5) opacity:    f32,
@@ -70,7 +78,8 @@ fn vs_main(
     out.radius_px   = radius_px;
     out.tilt        = tilt;
     out.angle       = tilt_az + stampAngle;
-    out.prev_center = color.xy;  // encoded by SmudgeTool: previous stamp's normalized pos
+    out.prev_center = color.xy;  // encoded by SmudgeTool: previous stamp's normalised pos
+    out.dynstr      = color.z;   // encoded by SmudgeTool: attack × grade
     return out;
 }
 
@@ -110,15 +119,18 @@ fn fs_pickup(in: VertexOut) -> @location(0) vec4<f32> {
     let layer   = textureSample(tex_b, texSmp, frag_uv);
 
     // Sample carry from the PREVIOUS stamp's center position.
-    // This advects color forward along the stroke: the color that was
-    // "on the finger" from prev position gets transported to curr position.
-    // For the very first stamp prev_center == current center → carry = layer → no drag (correct seed).
+    // This advects color forward along the stroke.
     let carry = textureSample(tex_a, texSmp, in.prev_center);
 
-    // Both layer and carry are premultiplied — simple mix is correct.
-    // Do NOT convert to/from straight alpha: layer.rgb is already rgb×alpha.
-    let t = u.strength * mask;
-    return mix(layer, carry, t);
+    // Dilution: uniformly scale carry (rgb and a) before absorption.
+    // Carry is premultiplied — scaling all channels preserves the premultiplied form.
+    let dil   = max(0.0, 1.0 - u.dilution * mask);
+    let faded = carry * dil;
+
+    // Absorption: blend faded carry toward layer.
+    // High charge → carry quickly takes on layer color.
+    let t = u.charge * mask;
+    return mix(faded, layer, t);
 }
 
 // ── Deposit ───────────────────────────────────────────────────────────────────
@@ -126,8 +138,7 @@ fn fs_pickup(in: VertexOut) -> @location(0) vec4<f32> {
 // tex_b = selMask    (R8Unorm — 1×1 white when no selection)
 //
 // Writes carry onto the layer using PREMULTIPLIED blend (one / one-minus-src-alpha).
-// carry is premultiplied; scale by eff uniformly so transparent areas fade correctly.
-// Using straight-alpha blend on premultiplied carry would double-apply alpha → black.
+// pull × dynstr scales the deposit strength; dynstr encodes CPU-side attack/grade.
 @fragment
 fn fs_deposit(in: VertexOut) -> @location(0) vec4<f32> {
     let uv       = in.clip_pos.xy / u.resolution;
@@ -137,9 +148,7 @@ fn fs_deposit(in: VertexOut) -> @location(0) vec4<f32> {
     let mask = stamp_mask(in);
     if mask < 0.001 { discard; }
 
-    // carry is premultiplied — scale rgb and a uniformly by eff.
-    // Blend state: one / one-minus-src-alpha (premultiplied compositing).
     let carry = textureSample(tex_a, texSmp, uv);
-    let eff   = mask * in.opacity * mask_val;
+    let eff   = u.pull * in.dynstr * mask * in.opacity * mask_val;
     return vec4<f32>(carry.rgb * eff, carry.a * eff);
 }

@@ -766,6 +766,11 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
     bind('bs-mix',      'bs-mix-val',      '%', v => {
         if (isSmudge()) app.smudgeTool.setStrength(v); else { app.brushTool.setMix(v); notifyBrushChange(); }
     });
+    // Smudge-specific dynamics
+    bind('bs-smudge-charge',   'bs-smudge-charge-val',   '%', v => { if (isSmudge()) app.smudgeTool.setCharge(v);   });
+    bind('bs-smudge-dilution', 'bs-smudge-dilution-val', '%', v => { if (isSmudge()) app.smudgeTool.setDilution(v); });
+    bind('bs-smudge-attack',   'bs-smudge-attack-val',   '%', v => { if (isSmudge()) app.smudgeTool.setAttack(v);   });
+    bind('bs-smudge-grade',    'bs-smudge-grade-val',    '%', v => { if (isSmudge()) app.smudgeTool.setGrade(v);    });
     bind('bs-pres-size',   'bs-pres-size-val',   '%', v => { app.brushTool.getDescriptor().pressureSize    = v; pushBrush(); });
     bind('bs-pres-opac',   'bs-pres-opac-val',   '%', v => { app.brushTool.getDescriptor().pressureOpacity = v; pushBrush(); });
     bind('bs-size-jitter', 'bs-size-jitter-val', '%', v => { app.brushTool.getDescriptor().sizeJitter      = v; pushBrush(); });
@@ -1036,18 +1041,21 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
                 show('bs-flow-row'); show('bs-mix-row');
                 show('bs-pressure-section'); show('bs-scatter-section');
                 show('bs-brush-adv');
+                hide('bs-smudge-section');
                 setText('bs-mix-label', 'Mix');
             } else if (tool === 'EraserTool') {
                 setText('bs-tool-title', 'Eraser');
                 hide('bs-flow-row'); hide('bs-mix-row');
                 hide('bs-pressure-section'); hide('bs-scatter-section');
                 hide('bs-brush-adv');
+                hide('bs-smudge-section');
             } else if (tool === 'SmudgeTool') {
                 setText('bs-tool-title', 'Smudge');
                 hide('bs-flow-row'); show('bs-mix-row');
                 hide('bs-pressure-section'); hide('bs-scatter-section');
                 hide('bs-brush-adv');
-                setText('bs-mix-label', 'Strength');
+                show('bs-smudge-section');
+                setText('bs-mix-label', 'Pull');
             }
         }
     };
@@ -1059,8 +1067,12 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         set('bs-opacity',  pct(d.opacity));              setTxt('bs-opacity-val',  pct(d.opacity) + '%');
         set('bs-hardness', pct(d.hardness));             setTxt('bs-hardness-val', pct(d.hardness) + '%');
         { const sv = Math.round(d.spacing * 200) / 2; set('bs-spacing', sv); setTxt('bs-spacing-val', (sv % 1 === 0 ? sv.toFixed(0) : sv.toFixed(1)) + '%'); }
-        set('bs-mix',      pct(d.smudge));               setTxt('bs-mix-val',      pct(d.smudge) + '%');
-        set('bs-roundness', pct(d.roundness));            setTxt('bs-roundness-val', pct(d.roundness) + '%');
+        set('bs-mix',           pct(d.smudge));          setTxt('bs-mix-val',           pct(d.smudge) + '%');
+        set('bs-roundness',     pct(d.roundness));       setTxt('bs-roundness-val',     pct(d.roundness) + '%');
+        set('bs-smudge-charge',   pct(d.smudgeCharge));  setTxt('bs-smudge-charge-val',   pct(d.smudgeCharge) + '%');
+        set('bs-smudge-dilution', pct(d.smudgeDilution)); setTxt('bs-smudge-dilution-val', pct(d.smudgeDilution) + '%');
+        set('bs-smudge-attack',   pct(d.smudgeAttack));  setTxt('bs-smudge-attack-val',   pct(d.smudgeAttack) + '%');
+        set('bs-smudge-grade',    pct(d.smudgeGrade));   setTxt('bs-smudge-grade-val',    pct(d.smudgeGrade) + '%');
     };
     const syncToEraser = () => {
         const d = app.eraserTool.getDescriptor();

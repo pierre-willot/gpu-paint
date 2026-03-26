@@ -216,8 +216,16 @@ export interface BrushDescriptor {
     blendMode:            BrushBlendMode;
 
     // ── Smudge ───────────────────────────────────────────────────────────────
-    /** Smudge amount (0..1). Tool-specific, used by SmudgeTool via SmudgeRenderer. */
-    smudge:               number;
+    /** Pull: deposit blend weight (0=nothing deposited, 1=carry fully replaces layer) */
+    smudge:          number;
+    /** Charge: pickup absorption rate (0=carry unchanged, 1=fully absorbed into layer) */
+    smudgeCharge:    number;
+    /** Dilution: carry fade-out per stamp (0=persistent, 1=rapid fade) */
+    smudgeDilution:  number;
+    /** Attack: ramp-in distance in normalised canvas units (0=instant) */
+    smudgeAttack:    number;
+    /** Grade: decay distance in normalised canvas units (0=no decay) */
+    smudgeGrade:     number;
 }
 
 // ── Factory / defaults ────────────────────────────────────────────────────────
@@ -314,7 +322,11 @@ export function defaultBrushDescriptor(): BrushDescriptor {
         wetEdge:              0,
 
         blendMode:            'normal',
-        smudge:               0,
+        smudge:          0,
+        smudgeCharge:    0.8,
+        smudgeDilution:  0,
+        smudgeAttack:    0,
+        smudgeGrade:     0,
     };
 }
 

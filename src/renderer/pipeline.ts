@@ -412,7 +412,13 @@ export class PaintPipeline {
         const layer = this.layerManager.getActiveLayer();
         if (!layer) return;
         const maskTex = this.selectionManager.hasMask ? this.selectionManager.getMaskTexture() : null;
-        const rect    = this.smudgeRenderer.draw(stamps, layer.texture, maskTex, descriptor.smudge, descriptor.hardness);
+        const rect    = this.smudgeRenderer.draw(
+            stamps, layer.texture, maskTex,
+            descriptor.smudge,         // pull
+            descriptor.smudgeCharge,   // charge
+            descriptor.smudgeDilution, // dilution
+            descriptor.hardness
+        );
         this.expandDirtyRect(rect);
         this.needsRedraw = true;
     }

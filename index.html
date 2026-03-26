@@ -464,6 +464,25 @@
         </div>
       </div>
 
+      <!-- ─── Smudge dynamics (SmudgeTool only) ──────────────────────────── -->
+      <details class="bs-card" id="bs-smudge-section" style="display:none" open>
+        <summary class="bs-card-hd">Smudge</summary>
+        <div class="bs-card-bd">
+          <div class="bs-row" title="How greedily the finger absorbs paint from the canvas. High = carry quickly becomes the layer color.">
+            <span class="bs-label">Charge</span><input type="range" class="slider bs-sl" id="bs-smudge-charge" min="0" max="100" value="80"><input type="text" class="bs-val txt-field" id="bs-smudge-charge-val" value="80%" maxlength="4">
+          </div>
+          <div class="bs-row" title="How quickly the carried paint fades out. High = finger runs dry; carry becomes transparent over time.">
+            <span class="bs-label">Dilution</span><input type="range" class="slider bs-sl" id="bs-smudge-dilution" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-smudge-dilution-val" value="0%" maxlength="4">
+          </div>
+          <div class="bs-row" title="Ramp-in distance — smudge builds from 0 to full strength over this stroke distance (0 = instant).">
+            <span class="bs-label">Attack</span><input type="range" class="slider bs-sl" id="bs-smudge-attack" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-smudge-attack-val" value="0%" maxlength="4">
+          </div>
+          <div class="bs-row" title="Decay distance — smudge fades from full strength to 0 over this stroke distance (0 = no decay).">
+            <span class="bs-label">Grade</span><input type="range" class="slider bs-sl" id="bs-smudge-grade" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-smudge-grade-val" value="0%" maxlength="4">
+          </div>
+        </div>
+      </details>
+
       <!-- ─── Shape ────────────────────────────────────────────────────────── -->
       <details class="bs-card" open>
         <summary class="bs-card-hd">Shape</summary>

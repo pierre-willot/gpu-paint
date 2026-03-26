@@ -4,6 +4,11 @@ import type { BrushDescriptor }               from '../../renderer/brush-descrip
 import type { PaintPipeline }                 from '../../renderer/pipeline';
 import { FLOATS_PER_STAMP }                  from '../../renderer/pipeline-cache';
 
+function smoothstep(edge0: number, edge1: number, x: number): number {
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
+}
+
 export class SmudgeTool extends BaseTool {
     private _descriptor: BrushDescriptor;
 
@@ -12,59 +17,70 @@ export class SmudgeTool extends BaseTool {
     private lastStampX = -1;
     private lastStampY = -1;
 
+    // Accumulated normalised stroke distance since stroke start — drives attack/grade.
+    private strokeDistNorm = 0;
+
     constructor() {
         super();
         this._descriptor = {
             ...defaultBrushDescriptor(),
             size:            0.05,
-            hardness:        0.5,   // softer default for natural smear
-            spacing:         0.10,  // tight spacing for smooth, gapless drag
+            hardness:        0.5,
+            spacing:         0.10,
             opacity:         1.0,
             flow:            1.0,
-            pressureSize:    0.5,   // pressure narrows the brush tip
+            pressureSize:    0.5,
             pressureOpacity: 0.0,
-            smudge:          0.8,   // pickup strength (0 = none, 1 = full transfer)
+            smudge:          0.8,   // pull
+            smudgeCharge:    0.8,
+            smudgeDilution:  0.0,
+            smudgeAttack:    0.0,
+            smudgeGrade:     0.0,
             blendMode:       'normal',
         };
     }
 
     public getDescriptor(): BrushDescriptor { return this._descriptor; }
 
-    public setSize(v: number):     void { this._descriptor.size     = v; this.pushDescriptor(); }
-    public setHardness(v: number): void { this._descriptor.hardness = v; this.pushDescriptor(); }
-    public setStrength(v: number): void { this._descriptor.smudge   = v; this.pushDescriptor(); }
-    public setSpacing(v: number):  void { this._descriptor.spacing  = v; this.pushDescriptor(); }
-    public setOpacity(v: number):  void { this._descriptor.opacity  = v; this.pushDescriptor(); }
+    public setSize(v: number):     void { this._descriptor.size          = v; this.pushDescriptor(); }
+    public setHardness(v: number): void { this._descriptor.hardness      = v; this.pushDescriptor(); }
+    public setStrength(v: number): void { this._descriptor.smudge        = v; this.pushDescriptor(); }
+    public setCharge(v: number):   void { this._descriptor.smudgeCharge  = v; }
+    public setDilution(v: number): void { this._descriptor.smudgeDilution = v; }
+    public setAttack(v: number):   void { this._descriptor.smudgeAttack  = v; }
+    public setGrade(v: number):    void { this._descriptor.smudgeGrade   = v; }
+    public setSpacing(v: number):  void { this._descriptor.spacing       = v; this.pushDescriptor(); }
+    public setOpacity(v: number):  void { this._descriptor.opacity       = v; this.pushDescriptor(); }
 
     // ── BaseTool hooks ────────────────────────────────────────────────────────
 
     /** Seed carry texture from active layer before first stamp is drawn. */
     protected onBeforeStroke(pipeline: PaintPipeline): void {
-        this.lastStampX = -1; // reset so first stamp uses its own position
-        this.lastStampY = -1;
+        this.lastStampX    = -1;
+        this.lastStampY    = -1;
+        this.strokeDistNorm = 0;
         pipeline.beginSmudgeStroke();
     }
 
     /**
-     * Encodes the previous stamp center into the color slot (floats 4-5) of each
-     * stamp, then routes through SmudgeRenderer.
+     * Encodes per-stamp data into repurposed color slots before GPU submission:
+     *   color.xy (stamp[4..5]) — previous stamp centre (advects carry forward)
+     *   color.z  (stamp[6])    — dynstr = attack × grade (CPU stroke dynamics)
      *
-     * The smudge shader samples carry from in.prev_center (the previous stamp's
-     * normalized position) rather than the fragment's own UV. This advects the
-     * carried color forward along the stroke — the fundamental mechanism for
-     * moving pixels.
+     * Attack ramps from 0→1 over the first smudgeAttack normalised canvas units.
+     * Grade decays from 1→0 over smudgeGrade normalised canvas units.
+     * Both are 1.0 when the respective distance is 0 (disabled).
      */
     protected drawToLayer(stamps: Float32Array, pipeline: PaintPipeline): void {
         if (!stamps.length) return;
 
-        const patched = new Float32Array(stamps); // copy so we don't mutate the original
+        const patched = new Float32Array(stamps);
+        const d = this._descriptor;
 
         for (let i = 0; i < patched.length; i += FLOATS_PER_STAMP) {
-            const cx = patched[i];     // current stamp normalized x
-            const cy = patched[i + 1]; // current stamp normalized y
+            const cx = patched[i];
+            const cy = patched[i + 1];
 
-            // For stamp 0 in this batch: use lastStampX/Y from previous batch.
-            // If no previous stamp exists yet, use the current position (no drag on first stamp).
             const prevX = (i === 0)
                 ? (this.lastStampX < 0 ? cx : this.lastStampX)
                 : patched[i - FLOATS_PER_STAMP];
@@ -72,8 +88,23 @@ export class SmudgeTool extends BaseTool {
                 ? (this.lastStampY < 0 ? cy : this.lastStampY)
                 : patched[i - FLOATS_PER_STAMP + 1];
 
-            patched[i + 4] = prevX; // color.r repurposed as prev_center.x
-            patched[i + 5] = prevY; // color.g repurposed as prev_center.y
+            // Accumulate stroke distance in normalised canvas units
+            const dx = cx - prevX, dy = cy - prevY;
+            this.strokeDistNorm += Math.sqrt(dx * dx + dy * dy);
+
+            // Attack: smoothstep ramp-in over first smudgeAttack units
+            const atk = d.smudgeAttack > 0
+                ? smoothstep(0, d.smudgeAttack, this.strokeDistNorm)
+                : 1.0;
+
+            // Grade: linear decay over smudgeGrade units from stroke start
+            const grd = d.smudgeGrade > 0
+                ? Math.max(0, 1 - this.strokeDistNorm / d.smudgeGrade)
+                : 1.0;
+
+            patched[i + 4] = prevX;       // color.r → prev_center.x
+            patched[i + 5] = prevY;       // color.g → prev_center.y
+            patched[i + 6] = atk * grd;   // color.z → dynstr
         }
 
         // Remember last stamp position for next batch
@@ -81,6 +112,6 @@ export class SmudgeTool extends BaseTool {
         this.lastStampX = patched[last];
         this.lastStampY = patched[last + 1];
 
-        pipeline.drawSmudge(patched, this._descriptor);
+        pipeline.drawSmudge(patched, d);
     }
 }
