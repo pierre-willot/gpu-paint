@@ -6,7 +6,6 @@ import { Command }                              from '../core/history-manager';
 import { LayerManager, LayerState, BlendMode }  from './layer-manager';
 import { BrushRenderer, DirtyRect }             from './brush-renderer';
 import { SmudgeRenderer }                       from './smudge-renderer';
-import { CpuSmudgeEngine }                      from './cpu-smudge-engine';
 import { CompositeRenderer }                    from './composite-renderer';
 import { CheckpointManager, Checkpoint }        from './checkpoint-manager';
 import { SelectionManager, SelectionMode }      from './selection-manager';
@@ -28,9 +27,6 @@ export class PaintPipeline {
     public  layerManager:      LayerManager;
     public  brushRenderer:     BrushRenderer;
     public  smudgeRenderer:    SmudgeRenderer;
-    public  cpuSmudgeEngine:   CpuSmudgeEngine;
-    private _cpuSmudgeReady    = false;
-    public  get cpuSmudgeReady(): boolean { return this._cpuSmudgeReady; }
     public  selectionManager:  SelectionManager;
     public  effectsPipeline:   EffectsPipeline;
     private compositeRenderer: CompositeRenderer;
@@ -78,7 +74,6 @@ export class PaintPipeline {
         this.layerManager      = new LayerManager(_device, _format, canvasWidth, canvasHeight);
         this.brushRenderer     = new BrushRenderer(_device, _format, canvasWidth, canvasHeight);
         this.smudgeRenderer    = new SmudgeRenderer(_device, _format, canvasWidth, canvasHeight);
-        this.cpuSmudgeEngine   = new CpuSmudgeEngine();
         this.compositeRenderer = new CompositeRenderer(_device, _format);
         this.checkpointManager = new CheckpointManager();
         this.selectionManager  = new SelectionManager(_device, _format, canvasWidth, canvasHeight);
@@ -420,43 +415,6 @@ export class PaintPipeline {
         const rect    = this.smudgeRenderer.draw(stamps, layer.texture, maskTex, descriptor.smudge, descriptor.hardness);
         this.expandDirtyRect(rect);
         this.needsRedraw = true;
-    }
-
-    // ── CPU Smudge ────────────────────────────────────────────────────────────
-
-    /**
-     * Async GPU readback — seeds the CPU pixel buffer from the active layer.
-     * SmudgeTool calls this at stroke start and processes pending stamps in the
-     * returned Promise's `.then()`.
-     */
-    public async beginCpuSmudgeStroke(): Promise<void> {
-        this._cpuSmudgeReady = false;
-        const layer = this.layerManager.getActiveLayer();
-        if (!layer) return;
-        await this.cpuSmudgeEngine.initFromTexture(this._device, layer.texture);
-        this._cpuSmudgeReady = true;
-    }
-
-    /** Apply a stamp batch on the CPU pixel buffer and upload result to GPU. */
-    public drawCpuSmudge(stamps: Float32Array, descriptor: BrushDescriptor): void {
-        if (!stamps.length || !this._cpuSmudgeReady) return;
-        this.hadPaintingSinceReset = true;
-        const layer = this.layerManager.getActiveLayer();
-        if (!layer) return;
-        this.cpuSmudgeEngine.applyStamps(
-            stamps,
-            descriptor.smudge,    // strength
-            descriptor.hardness,  // falloff sharpness
-            descriptor.wetness,   // lift_carry
-        );
-        this.cpuSmudgeEngine.uploadToTexture(this._device, layer.texture);
-        this.markDirty();
-    }
-
-    /** Free CPU pixel buffer. Call at stroke end. */
-    public endCpuSmudgeStroke(): void {
-        this._cpuSmudgeReady = false;
-        this.cpuSmudgeEngine.endStroke();
     }
 
     // ── Drawing ───────────────────────────────────────────────────────────────

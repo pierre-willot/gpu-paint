@@ -111,9 +111,8 @@ export class ToolbarUI {
         };
 
         brushBtn?.addEventListener('click', () => {
-            const isBrushActive = this.app.activeToolName === 'BrushTool' || this.app.activeToolName === 'BrushToolB';
-            if (isBrushActive) this.onToolSettingsOpen?.();
-            this.app.setTool(this.app.activeBrushTool);
+            if (this.app.activeToolName === 'BrushTool') this.onToolSettingsOpen?.();
+            this.app.setTool(this.app.brushTool);
             setActive(brushBtn);
         });
         eraserBtn?.addEventListener('click', () => {
@@ -145,7 +144,7 @@ export class ToolbarUI {
 
         // Sync when tool changes via keyboard shortcut
         this.app.bus.on('tool:change', ({ tool }) => {
-            brushBtn?.classList.toggle('active',      tool === 'BrushTool' || tool === 'BrushToolB');
+            brushBtn?.classList.toggle('active',      tool === 'BrushTool');
             eraserBtn?.classList.toggle('active',     tool === 'EraserTool');
             smudgeBtn?.classList.toggle('active',     tool === 'SmudgeTool');
             eyedropperBtn?.classList.toggle('active', tool === 'EyedropperTool');

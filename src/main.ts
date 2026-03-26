@@ -389,7 +389,6 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
 
     /** Push descriptor to worker and save to active preset. */
     const pushBrush = () => { app.brushTool.pushDescriptor(); notifyBrushChange(); schedulePreview(); };
-    const pushBrushB = () => { app.brushToolB.pushDescriptor(); schedulePreview(); };
 
     // ── Binding helpers ───────────────────────────────────────────────────────
 
@@ -1014,167 +1013,6 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         });
     }
 
-    // ── Engine A / B toggle ───────────────────────────────────────────────────
-
-    const engineATab = document.getElementById('bs-engine-a-tab');
-    const engineBTab = document.getElementById('bs-engine-b-tab');
-    const engineTabs = document.getElementById('bs-engine-tabs');
-    const engineBSection = document.getElementById('bs-engine-b');
-
-    // All Engine A content lives inside #bs-painting-section EXCEPT #bs-engine-b.
-    // We show/hide it by toggling display on each direct child except #bs-engine-b.
-    const engineASections = (): Element[] => {
-        const ps = document.getElementById('bs-painting-section');
-        if (!ps) return [];
-        return Array.from(ps.children).filter(el => el.id !== 'bs-engine-b');
-    };
-
-    const switchEngine = (engine: 'a' | 'b') => {
-        app.setBrushEngine(engine);
-        if (app.activeToolName === 'BrushTool' || app.activeToolName === 'BrushToolB') {
-            // setTool fires tool:change → syncLayout → syncToBrush/B handles UI update
-            app.setTool(app.activeBrushTool);
-        }
-    };
-
-    engineATab?.addEventListener('click', () => switchEngine('a'));
-    engineBTab?.addEventListener('click', () => switchEngine('b'));
-
-    // ── Engine B bindings ─────────────────────────────────────────────────────
-
-    bind('bs-b-opacity',   'bs-b-opacity-val',   '%', v => { app.brushToolB.setOpacity(v);  pushBrushB(); });
-    bind('bs-b-flow',      'bs-b-flow-val',      '%', v => { app.brushToolB.setFlow(v);     pushBrushB(); });
-    bind('bs-b-mix',       'bs-b-mix-val',       '%', v => { app.brushToolB.setMix(v);      pushBrushB(); });
-    bind('bs-b-hardness',  'bs-b-hardness-val',  '%', v => { app.brushToolB.setHardness(v); pushBrushB(); });
-    bind('bs-b-pres-size', 'bs-b-pres-size-val', '%', v => { app.brushToolB.getDescriptor().pressureSize = v; pushBrushB(); });
-
-    // Spacing (0.5–30 → 0.005–0.30)
-    {
-        const s = document.getElementById('bs-b-spacing') as HTMLInputElement | null;
-        const v = document.getElementById('bs-b-spacing-val') as HTMLInputElement | null;
-        s?.addEventListener('input', () => {
-            const n = parseFloat(s.value);
-            if (v) v.value = (n % 1 === 0 ? n.toFixed(0) : n.toFixed(1)) + '%';
-            app.brushToolB.setSpacing(n / 100);
-            pushBrushB();
-        });
-    }
-
-    // Grain depth/scale/rotation/static
-    bind('bs-b-grain-depth', 'bs-b-grain-depth-val', '%', v => { app.brushToolB.getDescriptor().grainDepth = v;  pushBrushB(); });
-    {
-        const s = document.getElementById('bs-b-grain-scale') as HTMLInputElement | null;
-        const v = document.getElementById('bs-b-grain-scale-val') as HTMLInputElement | null;
-        s?.addEventListener('input', () => {
-            const n = parseInt(s.value) / 100;
-            if (v) v.value = n.toFixed(2);
-            app.brushToolB.getDescriptor().grainScale = n;
-            pushBrushB();
-        });
-    }
-    {
-        const s = document.getElementById('bs-b-grain-rotation') as HTMLInputElement | null;
-        const v = document.getElementById('bs-b-grain-rotation-val') as HTMLInputElement | null;
-        s?.addEventListener('input', () => {
-            const n = parseInt(s.value);
-            if (v) v.value = n + '°';
-            app.brushToolB.getDescriptor().grainRotation = n;
-            pushBrushB();
-        });
-    }
-    bindToggle('bs-b-grain-static', on => { app.brushToolB.getDescriptor().grainStatic = on; pushBrushB(); });
-
-    // Grain blend mode
-    const bGrainModes = ['bs-b-grain-multiply','bs-b-grain-screen','bs-b-grain-overlay','bs-b-grain-normal'] as const;
-    const bGrainModeVals = ['multiply','screen','overlay','normal'] as const;
-    bGrainModes.forEach((id, i) => {
-        document.getElementById(id)?.addEventListener('click', () => {
-            bGrainModes.forEach(b => document.getElementById(b)?.classList.remove('active'));
-            document.getElementById(id)?.classList.add('active');
-            app.brushToolB.getDescriptor().grainBlendMode = bGrainModeVals[i];
-            pushBrushB();
-        });
-    });
-
-    // Engine B tip texture
-    {
-        const tipInput = document.createElement('input');
-        tipInput.type = 'file'; tipInput.accept = 'image/*'; tipInput.style.display = 'none';
-        document.body.appendChild(tipInput);
-        document.getElementById('bs-b-tip-load-btn')?.addEventListener('click', () => tipInput.click());
-        tipInput.addEventListener('change', async () => {
-            const file = tipInput.files?.[0]; if (!file) return;
-            tipInput.value = '';
-            try {
-                const bmp = await createImageBitmap(file, { resizeWidth: 256, resizeHeight: 256 });
-                const tex = app.pipeline.device.createTexture({
-                    size: [256, 256], format: 'rgba8unorm',
-                    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
-                });
-                app.pipeline.device.queue.copyExternalImageToTexture({ source: bmp }, { texture: tex }, [256, 256]);
-                drawThumb('bs-b-tip-thumb', bmp);
-                bmp.close();
-                app.pipeline.brushRenderer.setTipTexture(tex);
-                app.brushToolB.getDescriptor().tipIndex = 0;
-                const nameEl = document.getElementById('bs-b-tip-name');
-                if (nameEl) nameEl.textContent = file.name.replace(/\.[^.]+$/, '');
-                document.getElementById('bs-b-tip-clear-row')?.style.setProperty('display', '');
-                pushBrushB();
-            } catch (e) { console.warn('Tip texture load failed:', e); }
-        });
-        document.getElementById('bs-b-tip-clear-btn')?.addEventListener('click', () => {
-            app.pipeline.brushRenderer.setTipTexture(null);
-            app.brushToolB.getDescriptor().tipIndex = -1;
-            clearThumb('bs-b-tip-thumb');
-            const nameEl = document.getElementById('bs-b-tip-name');
-            if (nameEl) nameEl.textContent = 'Procedural (none)';
-            document.getElementById('bs-b-tip-clear-row')?.style.setProperty('display', 'none');
-            pushBrushB();
-        });
-    }
-
-    // Engine B grain texture
-    {
-        let bGrainTex: GPUTexture | null = null;
-        const grainInput = document.createElement('input');
-        grainInput.type = 'file'; grainInput.accept = 'image/*'; grainInput.style.display = 'none';
-        document.body.appendChild(grainInput);
-        document.getElementById('bs-b-grain-tex-load-btn')?.addEventListener('click', () => grainInput.click());
-        grainInput.addEventListener('change', async () => {
-            const file = grainInput.files?.[0]; if (!file) return;
-            grainInput.value = '';
-            try {
-                const bmp = await createImageBitmap(file, { resizeWidth: 256, resizeHeight: 256 });
-                bGrainTex?.destroy(); bGrainTex = null;
-                bGrainTex = app.pipeline.device.createTexture({
-                    size: [256, 256], format: 'rgba8unorm',
-                    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
-                });
-                app.pipeline.device.queue.copyExternalImageToTexture({ source: bmp }, { texture: bGrainTex }, [256, 256]);
-                drawThumb('bs-b-grain-thumb', bmp);
-                bmp.close();
-                app.pipeline.brushRenderer.setGrainTexture(bGrainTex);
-                const nameEl = document.getElementById('bs-b-grain-tex-name');
-                if (nameEl) nameEl.textContent = file.name.replace(/\.[^.]+$/, '');
-                document.getElementById('bs-b-grain-tex-clear-row')?.style.setProperty('display', '');
-            } catch (e) { console.warn('Grain texture load failed:', e); }
-        });
-        document.getElementById('bs-b-grain-tex-clear-btn')?.addEventListener('click', () => {
-            bGrainTex?.destroy(); bGrainTex = null;
-            app.pipeline.brushRenderer.setGrainTexture(null);
-            clearThumb('bs-b-grain-thumb');
-            const nameEl = document.getElementById('bs-b-grain-tex-name');
-            if (nameEl) nameEl.textContent = 'Procedural noise';
-            document.getElementById('bs-b-grain-tex-clear-row')?.style.setProperty('display', 'none');
-        });
-    }
-
-    // Engine B pressure curve
-    {
-        const bPcContainer = document.getElementById('bs-b-pressure-curve-container');
-        if (bPcContainer) new PressureCurveUI(bPcContainer, lut => { app.brushToolB.setPressureLUT(lut); });
-    }
-
     // ── Layout helpers ────────────────────────────────────────────────────────
 
     const set     = (id: string, v: number) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.value = String(v); };
@@ -1185,9 +1023,6 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
     const setToggleEl = (id: string, on: boolean) => { document.getElementById(id)?.classList.toggle('on', on); };
 
     const syncLayout = (tool: string) => {
-        const isBrushEngine = tool === 'BrushTool' || tool === 'BrushToolB';
-        if (engineTabs) engineTabs.style.display = isBrushEngine ? '' : 'none';
-
         if (tool === 'SelectionTool' || tool === 'FillTool' || tool === 'EyedropperTool') {
             hide('bs-painting-section');
             if (tool === 'SelectionTool') show('bs-selection-section');
@@ -1196,39 +1031,23 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         } else {
             show('bs-painting-section');
             hide('bs-selection-section');
-            if (tool === 'BrushToolB') {
-                setText('bs-tool-title', 'Brush B');
-                // Show Engine B section, hide all Engine A content
-                engineASections().forEach(el => { (el as HTMLElement).style.display = 'none'; });
-                if (engineBSection) engineBSection.style.display = '';
-                engineATab?.classList.remove('active');
-                engineBTab?.classList.add('active');
-            } else {
-                // Non-engine-B tools always show Engine A content
-                engineASections().forEach(el => { (el as HTMLElement).style.display = ''; });
-                if (engineBSection) engineBSection.style.display = 'none';
-                if (isBrushEngine) {
-                    engineATab?.classList.add('active');
-                    engineBTab?.classList.remove('active');
-                }
-                if (tool === 'BrushTool') {
-                    setText('bs-tool-title', 'Brush');
-                    show('bs-flow-row'); show('bs-mix-row');
-                    show('bs-pressure-section'); show('bs-scatter-section');
-                    show('bs-brush-adv');
-                    setText('bs-mix-label', 'Mix');
-                } else if (tool === 'EraserTool') {
-                    setText('bs-tool-title', 'Eraser');
-                    hide('bs-flow-row'); hide('bs-mix-row');
-                    hide('bs-pressure-section'); hide('bs-scatter-section');
-                    hide('bs-brush-adv');
-                } else if (tool === 'SmudgeTool') {
-                    setText('bs-tool-title', 'Smudge');
-                    hide('bs-flow-row'); show('bs-mix-row');
-                    hide('bs-pressure-section'); hide('bs-scatter-section');
-                    hide('bs-brush-adv');
-                    setText('bs-mix-label', 'Strength');
-                }
+            if (tool === 'BrushTool') {
+                setText('bs-tool-title', 'Brush');
+                show('bs-flow-row'); show('bs-mix-row');
+                show('bs-pressure-section'); show('bs-scatter-section');
+                show('bs-brush-adv');
+                setText('bs-mix-label', 'Mix');
+            } else if (tool === 'EraserTool') {
+                setText('bs-tool-title', 'Eraser');
+                hide('bs-flow-row'); hide('bs-mix-row');
+                hide('bs-pressure-section'); hide('bs-scatter-section');
+                hide('bs-brush-adv');
+            } else if (tool === 'SmudgeTool') {
+                setText('bs-tool-title', 'Smudge');
+                hide('bs-flow-row'); show('bs-mix-row');
+                hide('bs-pressure-section'); hide('bs-scatter-section');
+                hide('bs-brush-adv');
+                setText('bs-mix-label', 'Strength');
             }
         }
     };
@@ -1350,32 +1169,11 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         schedulePreview();
     };
 
-    const syncToBrushB = () => {
-        const d = app.brushToolB.getDescriptor();
-        set('bs-b-opacity',   pct(d.opacity));               setTxt('bs-b-opacity-val',   pct(d.opacity) + '%');
-        set('bs-b-flow',      pct(d.flow));                  setTxt('bs-b-flow-val',      pct(d.flow) + '%');
-        set('bs-b-mix',       pct(d.smudge));                setTxt('bs-b-mix-val',       pct(d.smudge) + '%');
-        set('bs-b-hardness',  pct(d.hardness));              setTxt('bs-b-hardness-val',  pct(d.hardness) + '%');
-        { const sv = Math.round(d.spacing * 200) / 2; set('bs-b-spacing', sv); setTxt('bs-b-spacing-val', (sv % 1 === 0 ? sv.toFixed(0) : sv.toFixed(1)) + '%'); }
-        set('bs-b-pres-size', pct(d.pressureSize));          setTxt('bs-b-pres-size-val', pct(d.pressureSize) + '%');
-        set('bs-b-grain-depth', pct(d.grainDepth));          setTxt('bs-b-grain-depth-val', pct(d.grainDepth) + '%');
-        set('bs-b-grain-scale', Math.round(d.grainScale * 100)); setTxt('bs-b-grain-scale-val', d.grainScale.toFixed(2));
-        set('bs-b-grain-rotation', Math.round(d.grainRotation)); setTxt('bs-b-grain-rotation-val', Math.round(d.grainRotation) + '°');
-        const setToggleEl2 = (id: string, on: boolean) => document.getElementById(id)?.classList.toggle('on', on);
-        setToggleEl2('bs-b-grain-static', d.grainStatic);
-        const blendIdx = { multiply:0, screen:1, overlay:2, normal:3 }[d.grainBlendMode] ?? 0;
-        ['bs-b-grain-multiply','bs-b-grain-screen','bs-b-grain-overlay','bs-b-grain-normal'].forEach(
-            (id, i) => document.getElementById(id)?.classList.toggle('active', i === blendIdx)
-        );
-        schedulePreview();
-    };
-
     app.bus.on('tool:change', ({ tool }) => {
         syncLayout(tool);
         if (tool === 'SmudgeTool') syncToSmudge();
         else if (tool === 'EraserTool') syncToEraser();
         else if (tool === 'BrushTool') syncToBrush();
-        else if (tool === 'BrushToolB') syncToBrushB();
     });
 }
 
