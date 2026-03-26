@@ -52,7 +52,7 @@ export class SmudgeRenderer {
         this.height = height;
 
         this.uniformBuffer = device.createBuffer({
-            size:  16,
+            size:  32, // vec2 resolution + hardness + charge + pull + dilution + 2 pad floats
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
         this.ringBuffer = device.createBuffer({
@@ -135,14 +135,16 @@ export class SmudgeRenderer {
         stamps:   Float32Array,
         layerTex: GPUTexture,
         maskTex:  GPUTexture | null,
-        strength: number,
+        pull:     number,
+        charge:   number,
+        dilution: number,
         hardness: number,
     ): DirtyRect | null {
         if (!stamps.length) return null;
 
         this.device.queue.writeBuffer(
             this.uniformBuffer, 0,
-            new Float32Array([this.width, this.height, hardness, strength])
+            new Float32Array([this.width, this.height, hardness, charge, pull, dilution, 0, 0])
         );
 
         // Process stamps one at a time: each stamp needs its own copy→pickup→deposit
