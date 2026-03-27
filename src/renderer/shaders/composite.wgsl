@@ -44,6 +44,18 @@ fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
     return out;
 }
 
+// ── Color space ───────────────────────────────────────────────────────────────
+
+// Convert linear light back to sRGB for output to the canvas (bgra8unorm).
+// Layer textures are bgra8unorm-srgb, so sampling returns linear values.
+// The canvas is bgra8unorm (linear storage, displayed as sRGB by the browser),
+// so we must encode manually before writing.
+fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let lo = c * 12.92;
+    let hi = 1.055 * pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(hi, lo, c <= vec3<f32>(0.0031308));
+}
+
 // ── Blend mode functions ──────────────────────────────────────────────────────
 // All functions operate on the layer's own RGB in 0→1 range.
 // The GPU alpha-blend stage (one, one-minus-src-alpha) then mixes the result
@@ -83,6 +95,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if      (layer.blendMode == 1u) { color = vec4<f32>(blend_multiply(color.rgb), color.a); }
     else if (layer.blendMode == 2u) { color = vec4<f32>(blend_screen(color.rgb),   color.a); }
     else if (layer.blendMode == 3u) { color = vec4<f32>(blend_overlay(color.rgb),  color.a); }
+
+    // Encode linear layer values back to sRGB for the canvas (bgra8unorm target).
+    // Layer textures are bgra8unorm-srgb, so sampled color.rgb is already linear.
+    color = vec4<f32>(linear_to_srgb(color.rgb), color.a);
 
     // Apply opacity: scales both RGB and alpha uniformly.
     // The GPU blend stage receives the scaled result and mixes it onto the

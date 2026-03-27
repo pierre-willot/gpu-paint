@@ -500,6 +500,15 @@ export class StrokeEngine {
         const finalSize = d.size * sizeMult * taperSize;
         let   finalOpacity = d.opacity * opacityMult * d.flow * flowMult * taperOpacity * wetFactor;
 
+        // ── Spacing normalisation ─────────────────────────────────────────────
+        // At very low spacing, many overlapping stamps accumulate opacity non-linearly.
+        // Scale per-stamp opacity down so the perceived coverage is consistent
+        // regardless of spacing, using the inverse compound formula 1-(1-x)^(1/k).
+        if (d.spacing < 0.5) {
+            const k = Math.max(1, Math.round(0.5 / d.spacing));
+            finalOpacity = 1 - Math.pow(Math.max(0, 1 - finalOpacity), 1 / k);
+        }
+
         this.strokeDistance += spacing;
 
         // ── P9: Wet edge — density-based opacity modulation ───────────────────

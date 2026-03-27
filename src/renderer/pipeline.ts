@@ -62,6 +62,11 @@ export class PaintPipeline {
     set activeLayerIndex(v: number)      { this.layerManager.activeLayerIndex = v;    }
     get device(): GPUDevice              { return this._device;                        }
     get format(): GPUTextureFormat       { return this._format;                        }
+    /** sRGB variant of the canvas format — used for all layer/carry textures so the
+     *  GPU blends in linear space while still storing compact 8-bit sRGB bytes. */
+    get layerFormat(): GPUTextureFormat  {
+        return this._format === 'bgra8unorm' ? 'bgra8unorm-srgb' : 'rgba8unorm-srgb';
+    }
 
     constructor(
         private _device:      GPUDevice,
@@ -71,14 +76,15 @@ export class PaintPipeline {
         public  canvasHeight: number,
         supportsTimestamps    = false
     ) {
-        this.layerManager      = new LayerManager(_device, _format, canvasWidth, canvasHeight);
-        this.brushRenderer     = new BrushRenderer(_device, _format, canvasWidth, canvasHeight);
-        this.smudgeRenderer    = new SmudgeRenderer(_device, _format, canvasWidth, canvasHeight);
+        const lf = this.layerFormat;
+        this.layerManager      = new LayerManager(_device, lf, canvasWidth, canvasHeight);
+        this.brushRenderer     = new BrushRenderer(_device, lf, canvasWidth, canvasHeight);
+        this.smudgeRenderer    = new SmudgeRenderer(_device, lf, canvasWidth, canvasHeight);
         this.compositeRenderer = new CompositeRenderer(_device, _format);
         this.checkpointManager = new CheckpointManager();
         this.selectionManager  = new SelectionManager(_device, _format, canvasWidth, canvasHeight);
         this.effectsPipeline   = new EffectsPipeline(_device);
-        this.overlayTexture    = createPersistentTexture(_device, canvasWidth, canvasHeight, _format);
+        this.overlayTexture    = createPersistentTexture(_device, canvasWidth, canvasHeight, lf);
 
         this.backingTexture = _device.createTexture({
             size:   [canvasWidth, canvasHeight],
@@ -276,7 +282,7 @@ export class PaintPipeline {
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING |
                    GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST
         });
-        this.overlayTexture = createPersistentTexture(this._device, physW, physH, this._format);
+        this.overlayTexture = createPersistentTexture(this._device, physW, physH, this.layerFormat);
 
         this.brushRenderer.updateResolution(physW, physH);
         this.smudgeRenderer.updateResolution(physW, physH);
