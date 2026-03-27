@@ -15,26 +15,7 @@ function makeBuiltIns(): BrushPreset[] {
     return [
         {
             id: '__soft_round', name: 'Soft Round', builtIn: true, category: 'Basic',
-            desc: { ...base, hardness: 0.0, spacing: 0.25, opacity: 0.9, pressureOpacity: 0.8 },
-        },
-        {
-            id: '__hard_round', name: 'Hard Round', builtIn: true, category: 'Basic',
-            desc: { ...base, hardness: 1.0, spacing: 0.10, opacity: 1.0, pressureSize: 1.0 },
-        },
-        {
-            id: '__pencil', name: 'Pencil', builtIn: true, category: 'Basic',
-            desc: { ...base, size: 0.03, hardness: 0.85, spacing: 0.15, opacity: 0.7,
-                    opacityJitter: 0.15, sizeJitter: 0.08 },
-        },
-        {
-            id: '__marker', name: 'Marker', builtIn: true, category: 'Basic',
-            desc: { ...base, hardness: 0.95, spacing: 0.05, opacity: 0.85, flow: 0.9,
-                    pressureSize: 0.3, pressureOpacity: 0.0 },
-        },
-        {
-            id: '__airbrush', name: 'Airbrush', builtIn: true, category: 'Basic',
-            desc: { ...base, size: 0.08, hardness: 0.0, spacing: 0.15, opacity: 0.4,
-                    flow: 0.3, pressureOpacity: 0.9 },
+            desc: { ...base, hardness: 0.0, spacing: 0.05, opacity: 0.9, pressureOpacity: 0.8 },
         },
     ];
 }

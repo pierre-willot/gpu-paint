@@ -398,14 +398,14 @@ export class PaintPipeline {
 
     // ── Smudge ────────────────────────────────────────────────────────────────
 
-    /** Seeds the smudge carry texture from the active layer. Call at stroke start. */
+    /** Seeds the wet-brush carry texture from the active layer. Call at stroke start. */
     public beginSmudgeStroke(): void {
         const layer = this.layerManager.getActiveLayer();
         if (!layer) return;
         this.smudgeRenderer.beginStroke(layer.texture);
     }
 
-    /** Two-pass GPU smudge render (pickup + deposit). Call from SmudgeTool.drawToLayer. */
+    /** Two-pass GPU wet-brush render (wet_mix + deposit). Call from UnifiedBrushTool.drawToLayer. */
     public drawSmudge(stamps: Float32Array, descriptor: BrushDescriptor): void {
         if (!stamps.length) return;
         this.hadPaintingSinceReset = true;
@@ -417,7 +417,8 @@ export class PaintPipeline {
             descriptor.smudge,         // pull
             descriptor.smudgeCharge,   // charge
             descriptor.smudgeDilution, // dilution
-            descriptor.hardness
+            descriptor.hardness,
+            descriptor.color,          // user_color
         );
         this.expandDirtyRect(rect);
         this.needsRedraw = true;

@@ -449,25 +449,25 @@
         <div class="bs-row" title="Edge softness — 0=smooth gaussian falloff, 100=sharp hard edge">
           <span class="bs-label">Hardness</span><input type="range" class="slider bs-sl" id="bs-hardness" min="0" max="100" value="95"><input type="text" class="bs-val txt-field" id="bs-hardness-val" value="95%" maxlength="4">
         </div>
-        <div class="bs-row" id="bs-mix-row" title="Smudge / mix — drags existing paint while painting. 0=off, 100=pure smudge">
-          <span class="bs-label" id="bs-mix-label">Mix</span><input type="range" class="slider bs-sl" id="bs-mix" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-mix-val" value="0%" maxlength="4">
+        <div class="bs-row" id="bs-mix-row" title="Pull — how strongly canvas color is picked up into the brush. Combine with Charge/Dilution for wet paint blending.">
+          <span class="bs-label" id="bs-mix-label">Pull</span><input type="range" class="slider bs-sl" id="bs-mix" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-mix-val" value="0%" maxlength="4">
         </div>
       </div>
 
-      <!-- ─── Smudge dynamics (SmudgeTool only) ──────────────────────────── -->
+      <!-- ─── Wet Mix dynamics ─────────────────────────────────────────────── -->
       <details class="bs-card" id="bs-smudge-section" style="display:none" open>
-        <summary class="bs-card-hd">Smudge</summary>
+        <summary class="bs-card-hd">Wet Mix</summary>
         <div class="bs-card-bd">
-          <div class="bs-row" title="How greedily the finger absorbs paint from the canvas. High = carry quickly becomes the layer color.">
+          <div class="bs-row" title="How much fresh paint is injected into the brush each step. High = opaque; Low = brush fades to canvas color.">
             <span class="bs-label">Charge</span><input type="range" class="slider bs-sl" id="bs-smudge-charge" min="0" max="100" value="80"><input type="text" class="bs-val txt-field" id="bs-smudge-charge-val" value="80%" maxlength="4">
           </div>
-          <div class="bs-row" title="How quickly the carried paint fades out. High = finger runs dry; carry becomes transparent over time.">
-            <span class="bs-label">Dilution</span><input type="range" class="slider bs-sl" id="bs-smudge-dilution" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-smudge-dilution-val" value="0%" maxlength="4">
+          <div class="bs-row" title="How strongly the brush color is deposited onto the canvas each step. High = strong mark; Low = subtle blending.">
+            <span class="bs-label">Dilution</span><input type="range" class="slider bs-sl" id="bs-smudge-dilution" min="0" max="100" value="100"><input type="text" class="bs-val txt-field" id="bs-smudge-dilution-val" value="100%" maxlength="4">
           </div>
-          <div class="bs-row" title="Ramp-in distance — smudge builds from 0 to full strength over this stroke distance (0 = instant).">
+          <div class="bs-row" id="bs-smudge-attack-row" title="Ramp-in distance — smudge builds from 0 to full strength over this stroke distance (0 = instant).">
             <span class="bs-label">Attack</span><input type="range" class="slider bs-sl" id="bs-smudge-attack" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-smudge-attack-val" value="0%" maxlength="4">
           </div>
-          <div class="bs-row" title="Decay distance — smudge fades from full strength to 0 over this stroke distance (0 = no decay).">
+          <div class="bs-row" id="bs-smudge-grade-row" title="Decay distance — smudge fades from full strength to 0 over this stroke distance (0 = no decay).">
             <span class="bs-label">Grade</span><input type="range" class="slider bs-sl" id="bs-smudge-grade" min="0" max="100" value="0"><input type="text" class="bs-val txt-field" id="bs-smudge-grade-val" value="0%" maxlength="4">
           </div>
         </div>

@@ -766,11 +766,11 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
     bind('bs-mix',      'bs-mix-val',      '%', v => {
         if (isSmudge()) app.smudgeTool.setStrength(v); else { app.brushTool.setMix(v); notifyBrushChange(); }
     });
-    // Smudge-specific dynamics
-    bind('bs-smudge-charge',   'bs-smudge-charge-val',   '%', v => { if (isSmudge()) app.smudgeTool.setCharge(v);   });
-    bind('bs-smudge-dilution', 'bs-smudge-dilution-val', '%', v => { if (isSmudge()) app.smudgeTool.setDilution(v); });
-    bind('bs-smudge-attack',   'bs-smudge-attack-val',   '%', v => { if (isSmudge()) app.smudgeTool.setAttack(v);   });
-    bind('bs-smudge-grade',    'bs-smudge-grade-val',    '%', v => { if (isSmudge()) app.smudgeTool.setGrade(v);    });
+    // Wet-mix dynamics (shared — apply in both brush and smudge modes)
+    bind('bs-smudge-charge',   'bs-smudge-charge-val',   '%', v => { app.brushTool.setCharge(v);   app.smudgeTool.setCharge(v);   });
+    bind('bs-smudge-dilution', 'bs-smudge-dilution-val', '%', v => { app.brushTool.setDilution(v); app.smudgeTool.setDilution(v); });
+    bind('bs-smudge-attack',   'bs-smudge-attack-val',   '%', v => { app.brushTool.setAttack(v);   app.smudgeTool.setAttack(v);   });
+    bind('bs-smudge-grade',    'bs-smudge-grade-val',    '%', v => { app.brushTool.setGrade(v);    app.smudgeTool.setGrade(v);    });
     bind('bs-pres-size',   'bs-pres-size-val',   '%', v => { app.brushTool.getDescriptor().pressureSize    = v; pushBrush(); });
     bind('bs-pres-opac',   'bs-pres-opac-val',   '%', v => { app.brushTool.getDescriptor().pressureOpacity = v; pushBrush(); });
     bind('bs-size-jitter', 'bs-size-jitter-val', '%', v => { app.brushTool.getDescriptor().sizeJitter      = v; pushBrush(); });
@@ -1042,7 +1042,8 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
                 show('bs-pressure-section'); show('bs-scatter-section');
                 show('bs-brush-adv');
                 show('bs-smudge-section');
-                setText('bs-mix-label', 'Mix');
+                setText('bs-mix-label', 'Pull');
+                show('bs-smudge-attack-row'); show('bs-smudge-grade-row');
             } else if (tool === 'EraserTool') {
                 setText('bs-tool-title', 'Eraser');
                 hide('bs-flow-row'); hide('bs-mix-row');
@@ -1056,6 +1057,7 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
                 show('bs-brush-adv');
                 show('bs-smudge-section');
                 setText('bs-mix-label', 'Pull');
+                show('bs-smudge-attack-row'); show('bs-smudge-grade-row');
             }
         }
     };

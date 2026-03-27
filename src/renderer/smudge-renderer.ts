@@ -52,7 +52,7 @@ export class SmudgeRenderer {
         this.height = height;
 
         this.uniformBuffer = device.createBuffer({
-            size:  32, // vec2 resolution + hardness + charge + pull + dilution + 2 pad floats
+            size:  48, // vec2 res + hardness + charge + pull + dilution + 2 pad + vec4 user_color
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
         this.ringBuffer = device.createBuffer({
@@ -94,7 +94,7 @@ export class SmudgeRenderer {
             layout,
             vertex:    { module, entryPoint: 'vs_main', buffers: [vb] },
             fragment:  {
-                module, entryPoint: 'fs_pickup',
+                module, entryPoint: 'fs_wet_mix',
                 targets: [{ format }], // no blend — overwrite
             },
             primitive: { topology: 'triangle-strip' },
@@ -119,32 +119,40 @@ export class SmudgeRenderer {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /** Call once at stroke start — seeds carry from the current layer state. */
+    /**
+     * Call once at stroke start — seeds carry from the current layer state.
+     * Initialising from the canvas means unvisited carry pixels are neutral
+     * (canvas color), so the first stamp produces no outline or inverted-mask
+     * artifacts regardless of pull/charge settings.
+     */
     public beginStroke(layerTexture: GPUTexture): void {
         const enc = this.device.createCommandEncoder();
         enc.copyTextureToTexture(
-            { texture: layerTexture },
+            { texture: layerTexture  },
             { texture: this.carryTexture },
             [this.width, this.height]
         );
         this.device.queue.submit([enc.finish()]);
     }
 
-    /** Two-pass GPU smudge per batch. Returns the pixel-space dirty rect. */
+    /** Two-pass GPU wet-brush per batch. Returns the pixel-space dirty rect. */
     public draw(
-        stamps:   Float32Array,
-        layerTex: GPUTexture,
-        maskTex:  GPUTexture | null,
-        pull:     number,
-        charge:   number,
-        dilution: number,
-        hardness: number,
+        stamps:    Float32Array,
+        layerTex:  GPUTexture,
+        maskTex:   GPUTexture | null,
+        pull:      number,
+        charge:    number,
+        dilution:  number,
+        hardness:  number,
+        userColor: [number, number, number, number],
     ): DirtyRect | null {
         if (!stamps.length) return null;
 
+        const [r, g, b, a] = userColor;
         this.device.queue.writeBuffer(
             this.uniformBuffer, 0,
-            new Float32Array([this.width, this.height, hardness, charge, pull, dilution, 0, 0])
+            new Float32Array([this.width, this.height, hardness, charge, pull, dilution, 0, 0,
+                              r, g, b, a]) // user_color at offset 32 (non-premultiplied)
         );
 
         // Process stamps one at a time: each stamp needs its own copy→pickup→deposit
