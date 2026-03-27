@@ -36,50 +36,6 @@ function makeBuiltIns(): BrushPreset[] {
             desc: { ...base, size: 0.08, hardness: 0.0, spacing: 0.15, opacity: 0.4,
                     flow: 0.3, pressureOpacity: 0.9 },
         },
-        // ── Concept art brushes ───────────────────────────────────────────────
-        {
-            id: '__flat_color', name: 'Flat Color', builtIn: true, category: 'Painting',
-            desc: { ...base, size: 0.08, hardness: 0.88, spacing: 0.05, opacity: 1.0,
-                    pressureSize: 0.45, flow: 1.0 },
-        },
-        {
-            id: '__soft_gradient', name: 'Soft Gradient', builtIn: true, category: 'Painting',
-            desc: { ...base, size: 0.12, hardness: 0.0, spacing: 0.10, opacity: 0.6,
-                    flow: 0.55, pressureOpacity: 0.9, opacityMin: 0, opacityMax: 1 },
-        },
-        {
-            id: '__rough_chalk', name: 'Rough Chalk', builtIn: true, category: 'Texture',
-            desc: { ...base, size: 0.045, hardness: 0.55, spacing: 0.18, opacity: 0.78,
-                    opacityJitter: 0.32, sizeJitter: 0.14, pressureOpacity: 0.5,
-                    grainIndex: 0, grainDepth: 0.42, grainScale: 1.4,
-                    grainBlendMode: 'multiply' },
-        },
-        {
-            id: '__dry_ink', name: 'Dry Ink', builtIn: true, category: 'Painting',
-            desc: { ...base, size: 0.025, hardness: 0.96, spacing: 0.07, opacity: 0.92,
-                    pressureSize: 0.9, followStroke: true, sizeJitter: 0.04 },
-        },
-        {
-            id: '__scatter_spatter', name: 'Spatter', builtIn: true, category: 'Texture',
-            desc: { ...base, size: 0.018, hardness: 0.78, spacing: 0.65, opacity: 0.82,
-                    scatterX: 0.035, scatterY: 0.035, stampCount: 4, stampCountJitter: 2,
-                    opacityJitter: 0.42, sizeJitter: 0.28, pressureSize: 0.3 },
-        },
-        // ── P8: Bristle ───────────────────────────────────────────────────────
-        {
-            id: '__fan_brush', name: 'Fan Brush', builtIn: true, category: 'Special',
-            desc: { ...base, size: 0.06, hardness: 0.7, spacing: 0.12, opacity: 0.75,
-                    pressureSize: 0.5, pressureOpacity: 0.4, followStroke: true,
-                    bristleCount: 14, bristleLength: 1.2,
-                    sizeJitter: 0.05, opacityJitter: 0.2, angleJitter: 4 },
-        },
-        {
-            id: '__watercolor_wash', name: 'Watercolor Wash', builtIn: true, category: 'Special',
-            desc: { ...base, size: 0.10, hardness: 0.0, spacing: 0.20, opacity: 0.55,
-                    pressureOpacity: 0.7, flow: 0.6, wetness: 0.3, paintLoad: 0.7,
-                    wetEdge: 0.65,
-                    grainIndex: 5, grainDepth: 0.25, grainStatic: true, grainScale: 1.8 },
-        },
     ];
 }
 

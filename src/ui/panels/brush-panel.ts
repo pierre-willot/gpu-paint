@@ -1,22 +1,6 @@
 import type { PaintApp }      from '../../core/app';
 import type { BrushDescriptor } from '../../renderer/brush-descriptor';
-import { defaultEraserDescriptor } from '../../renderer/brush-descriptor';
 import { BrushPresets, type BrushPreset } from '../../core/brush-presets';
-
-// ── Built-in eraser presets ────────────────────────────────────────────────────
-const ERASER_PRESETS: { name: string; desc: Partial<BrushDescriptor> }[] = [
-    { name: 'Hard',     desc: { hardness: 1.0, opacity: 1.0, size: 0.05,  spacing: 0.10 } },
-    { name: 'Soft',     desc: { hardness: 0.0, opacity: 1.0, size: 0.07,  spacing: 0.08 } },
-    { name: 'Airbrush', desc: { hardness: 0.0, opacity: 0.35, size: 0.09, spacing: 0.05 } },
-];
-
-// ── Built-in smudge presets ────────────────────────────────────────────────────
-const SMUDGE_PRESETS: { name: string; desc: Partial<BrushDescriptor> }[] = [
-    { name: 'Light',  desc: { smudge: 0.30, hardness: 0.6, opacity: 1.0, spacing: 0.12 } },
-    { name: 'Medium', desc: { smudge: 0.70, hardness: 0.5, opacity: 1.0, spacing: 0.10 } },
-    { name: 'Heavy',  desc: { smudge: 0.95, hardness: 0.4, opacity: 1.0, spacing: 0.10 } },
-    { name: 'Dry',    desc: { smudge: 0.80, hardness: 1.0, opacity: 1.0, spacing: 0.08 } },
-];
 
 // ── Stroke preview on a 2D canvas ─────────────────────────────────────────────
 
@@ -63,13 +47,11 @@ export function drawPreview(canvas: HTMLCanvasElement, desc: BrushDescriptor): v
 // ── BrushPanel ────────────────────────────────────────────────────────────────
 
 export class BrushPanel {
-    private el:              HTMLElement;
-    private listEl:          HTMLElement;
-    private selectedId:      string | null = null;
-    private selectedEraser:  number = 0;
-    private selectedSmudge:  number = 0;
-    private fileInput:       HTMLInputElement;
-    private activeCategory:  string = 'All';
+    private el:             HTMLElement;
+    private listEl:         HTMLElement;
+    private selectedId:     string | null = null;
+    private fileInput:      HTMLInputElement;
+    private activeCategory: string = 'All';
 
     /** Called after a brush preset is loaded — use to sync GPU state (grain config, etc.). */
     public onPresetLoaded: ((desc: BrushDescriptor) => void) | null = null;
@@ -90,8 +72,6 @@ export class BrushPanel {
         this.wireButtons();
         this.renderFilterBar();
         this.render();
-        this.renderEraserPresets();
-        this.renderSmudgePresets();
         this.wireSelectionSection();
 
         // Select + apply the first built-in by default
@@ -120,43 +100,59 @@ export class BrushPanel {
 
     public isOpen(): boolean { return this.el.style.display !== 'none'; }
 
-    /** Show the section appropriate for the given tool, update title. */
+    /**
+     * Show the section appropriate for the given tool, update title.
+     *
+     * All painting tools (Brush, Smudge, Eraser) now show the SAME unified
+     * brush library so any preset is accessible from any mode.  Only the
+     * Selection tool gets a dedicated section (type buttons).
+     */
     public showSection(toolName: string): void {
         const title    = document.getElementById('bp-title');
         const toolbar  = document.getElementById('bp-brush-toolbar');
         const brushSec = document.getElementById('tg-brush-section');
-        const eraserSec= document.getElementById('tg-eraser-section');
-        const smudgeSec= document.getElementById('tg-smudge-section');
         const selSec   = document.getElementById('tg-selection-section');
 
         const hide = (el: HTMLElement | null) => { if (el) el.style.display = 'none'; };
         const show = (el: HTMLElement | null, d = '') => { if (el) el.style.display = d; };
 
-        hide(brushSec); hide(eraserSec); hide(smudgeSec); hide(selSec);
-        hide(toolbar);
+        hide(brushSec); hide(selSec); hide(toolbar);
 
         switch (toolName) {
             case 'BrushTool':
                 if (title) title.textContent = 'Brushes';
                 show(brushSec); show(toolbar);
-                break;
-            case 'EraserTool':
-                if (title) title.textContent = 'Eraser';
-                show(eraserSec);
+                this.setFilter('All');
                 break;
             case 'SmudgeTool':
                 if (title) title.textContent = 'Smudge';
-                show(smudgeSec);
+                show(brushSec); show(toolbar);
+                this.setFilter('Smudge');
+                break;
+            case 'EraserTool':
+                if (title) title.textContent = 'Eraser';
+                show(brushSec);
+                this.setFilter('Eraser');
                 break;
             case 'SelectionTool':
                 if (title) title.textContent = 'Selection';
                 show(selSec);
                 break;
             default:
-                // For fill, eyedropper, etc. — just show brush section
                 if (title) title.textContent = 'Brushes';
                 show(brushSec); show(toolbar);
         }
+    }
+
+    /** Activate a filter chip programmatically (used by showSection). */
+    private setFilter(category: string): void {
+        if (this.activeCategory === category) return;
+        this.activeCategory = category;
+        const bar = document.getElementById('bp-filter-bar');
+        bar?.querySelectorAll('.bp-filter-chip').forEach(c =>
+            c.classList.toggle('active', (c as HTMLElement).dataset['cat'] === category)
+        );
+        this.render();
     }
 
     // ── Filter bar ────────────────────────────────────────────────────────────
@@ -169,7 +165,7 @@ export class BrushPanel {
         bar.className = 'bp-filter-bar';
         bar.id        = 'bp-filter-bar';
 
-        const categories = ['All', 'Basic', 'Painting', 'Texture', 'Special', 'Custom'];
+        const categories = ['All', 'Basic', 'Painting', 'Texture', 'Special', 'Smudge', 'Eraser', 'Custom'];
         for (const cat of categories) {
             const chip = document.createElement('button');
             chip.className   = 'bp-filter-chip' + (cat === this.activeCategory ? ' active' : '');
@@ -263,7 +259,17 @@ export class BrushPanel {
         const preset = this.presets.getById(id);
         if (!preset) return;
 
-        // Preserve user's current paint color
+        if (this.app.activeToolName === 'EraserTool') {
+            // Eraser: apply only the shape parameters — blendMode stays 'erase'
+            this.app.eraserTool.setHardness(preset.desc.hardness);
+            this.app.eraserTool.setOpacity(preset.desc.opacity);
+            this.app.eraserTool.setSpacing(preset.desc.spacing);
+            this.app.setBrushSize(preset.desc.size);
+            this.syncSettingsUI(preset.desc);
+            return;
+        }
+
+        // Paint or Smudge mode: load full descriptor into the unified brush tool
         const color = this.app.brushTool.getCurrentColor();
         this.app.brushTool.loadDescriptor(preset.desc);
         this.app.brushTool.setColor(...color);
@@ -340,81 +346,6 @@ export class BrushPanel {
         ['bs-grain-multiply','bs-grain-screen','bs-grain-overlay','bs-grain-normal'].forEach(
             (id, i) => document.getElementById(id)?.classList.toggle('active', i === blendIdx)
         );
-    }
-
-    // ── Eraser presets ────────────────────────────────────────────────────────
-
-    private renderEraserPresets(): void {
-        const list = document.getElementById('tg-eraser-list');
-        if (!list) return;
-        list.innerHTML = '';
-        ERASER_PRESETS.forEach((preset, i) => {
-            const base = { ...defaultEraserDescriptor(), ...preset.desc };
-            const item = document.createElement('div');
-            item.className = 'bp-item' + (i === this.selectedEraser ? ' active' : '');
-
-            const canvas = document.createElement('canvas');
-            canvas.className = 'bp-preview';
-            canvas.width = 148; canvas.height = 32;
-            drawPreview(canvas, base as any);
-
-            const name = document.createElement('span');
-            name.className = 'bp-name';
-            name.textContent = preset.name;
-
-            item.appendChild(canvas);
-            item.appendChild(name);
-            item.addEventListener('click', () => {
-                this.selectedEraser = i;
-                list.querySelectorAll('.bp-item').forEach((el, j) =>
-                    el.classList.toggle('active', j === i)
-                );
-                this.app.eraserTool.setHardness(base.hardness ?? 1);
-                this.app.eraserTool.setOpacity(base.opacity ?? 1);
-                this.app.eraserTool.setSpacing(base.spacing ?? 0.1);
-                this.app.setBrushSize(base.size ?? 0.05);
-                this.syncSettingsUI(base as any);
-            });
-            list.appendChild(item);
-        });
-    }
-
-    // ── Smudge presets ────────────────────────────────────────────────────────
-
-    private renderSmudgePresets(): void {
-        const list = document.getElementById('tg-smudge-list');
-        if (!list) return;
-        list.innerHTML = '';
-        SMUDGE_PRESETS.forEach((preset, i) => {
-            const base = { ...defaultEraserDescriptor(), blendMode: 'normal', ...preset.desc };
-            const item = document.createElement('div');
-            item.className = 'bp-item' + (i === this.selectedSmudge ? ' active' : '');
-
-            const canvas = document.createElement('canvas');
-            canvas.className = 'bp-preview';
-            canvas.width = 148; canvas.height = 32;
-            drawPreview(canvas, base as any);
-
-            const name = document.createElement('span');
-            name.className = 'bp-name';
-            name.textContent = preset.name;
-
-            item.appendChild(canvas);
-            item.appendChild(name);
-            item.addEventListener('click', () => {
-                this.selectedSmudge = i;
-                list.querySelectorAll('.bp-item').forEach((el, j) =>
-                    el.classList.toggle('active', j === i)
-                );
-                this.app.smudgeTool.setHardness(base.hardness ?? 0.5);
-                this.app.smudgeTool.setOpacity(base.opacity ?? 1);
-                this.app.smudgeTool.setSpacing(base.spacing ?? 0.1);
-                this.app.smudgeTool.setStrength(base.smudge ?? 0.7);
-                this.app.setBrushSize(base.size ?? 0.05);
-                this.syncSettingsUI(base as any);
-            });
-            list.appendChild(item);
-        });
     }
 
     // ── Selection type section ────────────────────────────────────────────────

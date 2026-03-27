@@ -407,3 +407,7 @@ header{
 .export-label{font-size:10px;color:var(--text-3);margin-bottom:2px}
 .export-option-btn{width:100%;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-size:12px}
 .export-badge{font-size:9px;font-family:'DM Mono',monospace;color:var(--text-3)}
+
+/* ── Version badge ──────────────────────────────────────────────────────────── */
+#version-badge{position:fixed;bottom:8px;right:10px;font-family:'DM Mono',monospace;font-size:10px;color:var(--text-3);opacity:0.5;pointer-events:none;z-index:1;user-select:none}
+

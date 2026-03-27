@@ -3,12 +3,11 @@ import { HistoryManager }                          from './history-manager';
 import { NavigationManager }                       from '../input/navigation';
 import { setupPointer }                            from '../input/pointer';
 import { Tool }                                    from './tool';
-import { BrushTool }                               from './tools/brush-tool';
+import { UnifiedBrushTool }                        from './tools/unified-brush-tool';
 import { EraserTool }                              from './tools/eraser-tool';
 import { EyedropperTool }                          from './tools/eyedropper-tool';
 import { FillTool }                                from './tools/fill-tool';
 import { SelectionTool }                           from './tools/selection-tool';
-import { SmudgeTool }                              from './tools/smudge-tool';
 import { TransformTool }                           from './tools/transform-tool';
 import { TransformOverlay }                        from '../ui/overlays/transform-overlay';
 import { EventBus }                                from './event-bus';
@@ -32,9 +31,8 @@ export class PaintApp {
     public  autosave!:      AutosaveManager;
 
     private _activeTool:    Tool;
-    public  brushTool:      BrushTool;
+    public  brushTool:      UnifiedBrushTool;
     public  eraserTool:     EraserTool;
-    public  smudgeTool:     SmudgeTool;
     public  eyedropperTool: EyedropperTool;
     public  fillTool:       FillTool;
     public  selectionTool:  SelectionTool;
@@ -94,9 +92,8 @@ export class PaintApp {
             }
         );
 
-        this.brushTool      = new BrushTool();
+        this.brushTool      = new UnifiedBrushTool();
         this.eraserTool     = new EraserTool();
-        this.smudgeTool     = new SmudgeTool();
         this.eyedropperTool = new EyedropperTool(this.pipeline, this.bus);
         this.fillTool       = new FillTool();
         this.selectionTool  = new SelectionTool(canvas);
@@ -148,10 +145,30 @@ export class PaintApp {
         this.setupInputs();
     }
 
-    // Expose active tool name for bus sync
-    public get activeToolName():    string    { return this._activeTool.constructor.name; }
-    public get activeTool():        Tool      { return this._activeTool; }
-    public get activeBrushTool():   BrushTool { return this.brushTool; }
+    /** Virtual tool name — returns 'SmudgeTool'/'BrushTool' for UnifiedBrushTool based on mode. */
+    public get activeToolName(): string {
+        if (this._activeTool === this.brushTool) return this.brushTool.toolName;
+        return this._activeTool.constructor.name;
+    }
+    public get activeTool():       Tool             { return this._activeTool; }
+    public get activeBrushTool():  UnifiedBrushTool { return this.brushTool; }
+    /** Backwards-compat getter — smudge mode is now a mode of brushTool, not a separate instance. */
+    public get smudgeTool():       UnifiedBrushTool { return this.brushTool; }
+
+    /** Switch to paint mode and activate brushTool. */
+    public usePaintMode(): void {
+        this.brushTool.mode = 'paint';
+        this.setTool(this.brushTool);
+    }
+
+    /** Switch to smudge mode and activate brushTool. Auto-initialises pull to 0.8 on first use. */
+    public useSmudgeMode(): void {
+        if (this.brushTool.getDescriptor().smudge === 0) {
+            this.brushTool.getDescriptor().smudge = 0.8;
+        }
+        this.brushTool.mode = 'smudge';
+        this.setTool(this.brushTool);
+    }
 
     // ── Brush cursor ──────────────────────────────────────────────────────────
 
@@ -255,10 +272,11 @@ export class PaintApp {
     public setTool(tool: Tool): void {
         this._activeTool.reset(this.pipeline);
         this._activeTool = tool;
-        this.bus.emit('tool:change', { tool: tool.constructor.name });
 
-        const isBrushLike = tool === this.brushTool || tool === this.eraserTool || tool === this.smudgeTool;
+        const isBrushLike = tool === this.brushTool || tool === this.eraserTool;
         this.brushCursor?.setVisible(isBrushLike);
+        // Emit virtual name so isSmudge()/isBrush() checks in UI continue to work.
+        this.bus.emit('tool:change', { tool: this.activeToolName });
         this.canvas.style.cursor =
             isBrushLike                  ? 'none'
           : tool === this.eyedropperTool ? 'crosshair'
@@ -272,14 +290,12 @@ export class PaintApp {
     public setPressureCurve(lut: Float32Array): void {
         this.brushTool.setPressureLUT(lut.slice());
         this.eraserTool.setPressureLUT(lut.slice());
-        this.smudgeTool.setPressureLUT(lut.slice());
     }
 
     private pushPressureLUT(): void {
         const lut = this.pressureCurve.toLUT();
         this.brushTool.setPressureLUT(lut.slice());
         this.eraserTool.setPressureLUT(lut.slice());
-        this.smudgeTool.setPressureLUT(lut.slice());
     }
 
     // ── Events ────────────────────────────────────────────────────────────────
@@ -366,18 +382,17 @@ export class PaintApp {
                 this._hadSelectionAtPointerDown = this.pipeline.selectionManager.hasMask;
                 // Capture layer state before any painting begins (for pixel-based undo)
                 const isPaintingTool = this._activeTool === this.brushTool ||
-                                       this._activeTool === this.eraserTool ||
-                                       this._activeTool === this.smudgeTool;
+                                       this._activeTool === this.eraserTool;
                 if (isPaintingTool) {
                     const layer = this.pipeline.layerManager.getActiveLayer();
                     if (layer) {
                         this._strokeBeforePixelsPromise =
                             this.pipeline.effectsPipeline.snapshotTexture(layer.texture);
-                        // Wet mixing: GPU-to-GPU copy of layer at stroke start.
+                        // Wet mixing: GPU-to-GPU copy of layer at stroke start (paint mode only).
                         // Must be synchronous so the pickup texture is ready before the
                         // first stamp is drawn. Do NOT use the async snapshotTexture path.
-                        if (this._activeTool === this.brushTool) {
-                            const wetness = (this._activeTool as BrushTool).getDescriptor().wetness;
+                        if (this._activeTool === this.brushTool && this.brushTool.mode === 'paint') {
+                            const wetness = this.brushTool.getDescriptor().wetness;
                             if (wetness > 0) {
                                 this._pickupTexture?.destroy();
                                 this._pickupTexture = this.pipeline.device.createTexture({
@@ -433,7 +448,7 @@ export class PaintApp {
                 const c      = this.translatePoint(e.clientX, e.clientY);
                 await this._activeTool.onPointerUp(c.x, c.y, p, this.pipeline);
 
-                if (this._activeTool === this.smudgeTool) {
+                if (this._activeTool === this.brushTool && this.brushTool.mode === 'smudge') {
                     const layer = this.pipeline.layerManager.getActiveLayer();
                     if (layer && this._strokeBeforePixelsPromise && this.pipeline.hadPaintingSinceReset) {
                         const [beforePixels, afterPixels] = await Promise.all([
@@ -503,7 +518,6 @@ export class PaintApp {
 
     public setBrushSize(size: number): void {
         this.brushTool.setSize(size);
-        this.smudgeTool.setSize(size);
         this.pipeline.updateUniforms(this.canvas.width, this.canvas.height, size);
         this.brushCursor?.setSize(size);
         this.bus.emit('brush:change', { size, color: Array.from(this.activeBrushTool.getCurrentColor()) });

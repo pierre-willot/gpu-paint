@@ -165,8 +165,8 @@ async function bootstrap() {
         colorState.subscribeLocal(() => {
             const { rgb } = colorState;
             app.setBrushColor(rgb.r / 255, rgb.g / 255, rgb.b / 255, 1.0);
-            // Color picker interaction → switch to brush (but not when eyedropper sets the color)
-            if (!eyedropperChanging) app.setTool(app.brushTool);
+            // Color picker interaction → switch to paint mode (but not when eyedropper sets the color)
+            if (!eyedropperChanging) app.usePaintMode();
         });
         app.bus.on('color:change', ({ rgb }) => {
             eyedropperChanging = true;
@@ -368,7 +368,7 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
 
     /** Save current brush descriptor back to the active preset and refresh its preview. */
     const notifyBrushChange = () => {
-        if (isSmudge() || isEraser()) return;
+        if (isEraser()) return;  // Eraser uses its own descriptor, not the preset store
         const id = brushPanel.getSelectedPresetId();
         if (!id) return;
         const desc = app.brushTool.getDescriptor();
@@ -1041,7 +1041,7 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
                 show('bs-flow-row'); show('bs-mix-row');
                 show('bs-pressure-section'); show('bs-scatter-section');
                 show('bs-brush-adv');
-                hide('bs-smudge-section');
+                show('bs-smudge-section');
                 setText('bs-mix-label', 'Mix');
             } else if (tool === 'EraserTool') {
                 setText('bs-tool-title', 'Eraser');
@@ -1052,8 +1052,8 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
             } else if (tool === 'SmudgeTool') {
                 setText('bs-tool-title', 'Smudge');
                 hide('bs-flow-row'); show('bs-mix-row');
-                hide('bs-pressure-section'); hide('bs-scatter-section');
-                hide('bs-brush-adv');
+                show('bs-pressure-section'); show('bs-scatter-section');
+                show('bs-brush-adv');
                 show('bs-smudge-section');
                 setText('bs-mix-label', 'Pull');
             }
@@ -1062,18 +1062,6 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
 
     // ── Sync functions ────────────────────────────────────────────────────────
 
-    const syncToSmudge = () => {
-        const d = app.smudgeTool.getDescriptor();
-        set('bs-opacity',  pct(d.opacity));              setTxt('bs-opacity-val',  pct(d.opacity) + '%');
-        set('bs-hardness', pct(d.hardness));             setTxt('bs-hardness-val', pct(d.hardness) + '%');
-        { const sv = Math.round(d.spacing * 200) / 2; set('bs-spacing', sv); setTxt('bs-spacing-val', (sv % 1 === 0 ? sv.toFixed(0) : sv.toFixed(1)) + '%'); }
-        set('bs-mix',           pct(d.smudge));          setTxt('bs-mix-val',           pct(d.smudge) + '%');
-        set('bs-roundness',     pct(d.roundness));       setTxt('bs-roundness-val',     pct(d.roundness) + '%');
-        set('bs-smudge-charge',   pct(d.smudgeCharge));  setTxt('bs-smudge-charge-val',   pct(d.smudgeCharge) + '%');
-        set('bs-smudge-dilution', pct(d.smudgeDilution)); setTxt('bs-smudge-dilution-val', pct(d.smudgeDilution) + '%');
-        set('bs-smudge-attack',   pct(d.smudgeAttack));  setTxt('bs-smudge-attack-val',   pct(d.smudgeAttack) + '%');
-        set('bs-smudge-grade',    pct(d.smudgeGrade));   setTxt('bs-smudge-grade-val',    pct(d.smudgeGrade) + '%');
-    };
     const syncToEraser = () => {
         const d = app.eraserTool.getDescriptor();
         set('bs-opacity',  pct(d.opacity));              setTxt('bs-opacity-val',  pct(d.opacity) + '%');
@@ -1166,6 +1154,12 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         set('bs-paint-load', pct(d.paintLoad));           setTxt('bs-paint-load-val', pct(d.paintLoad) + '%');
         set('bs-wet-edge',   pct(d.wetEdge ?? 0));        setTxt('bs-wet-edge-val',   pct(d.wetEdge ?? 0) + '%');
 
+        // Smudge dynamics (shared descriptor — always kept in sync, visible only in smudge mode)
+        set('bs-smudge-charge',   pct(d.smudgeCharge));   setTxt('bs-smudge-charge-val',   pct(d.smudgeCharge) + '%');
+        set('bs-smudge-dilution', pct(d.smudgeDilution)); setTxt('bs-smudge-dilution-val', pct(d.smudgeDilution) + '%');
+        set('bs-smudge-attack',   pct(d.smudgeAttack));   setTxt('bs-smudge-attack-val',   pct(d.smudgeAttack) + '%');
+        set('bs-smudge-grade',    pct(d.smudgeGrade));    setTxt('bs-smudge-grade-val',    pct(d.smudgeGrade) + '%');
+
         // Texture / Grain
         set('bs-grain-depth',      pct(d.grainDepth));                    setTxt('bs-grain-depth-val',      pct(d.grainDepth) + '%');
         set('bs-grain-scale',      Math.round(d.grainScale * 100));        setTxt('bs-grain-scale-val',      (d.grainScale).toFixed(2));
@@ -1183,9 +1177,8 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
 
     app.bus.on('tool:change', ({ tool }) => {
         syncLayout(tool);
-        if (tool === 'SmudgeTool') syncToSmudge();
+        if (tool === 'SmudgeTool' || tool === 'BrushTool') syncToBrush();
         else if (tool === 'EraserTool') syncToEraser();
-        else if (tool === 'BrushTool') syncToBrush();
     });
 }
 
