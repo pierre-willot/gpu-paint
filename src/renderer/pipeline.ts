@@ -84,7 +84,7 @@ export class PaintPipeline {
         this.layerManager      = new LayerManager(_device, lf, canvasWidth, canvasHeight);
         this.brushRenderer     = new BrushRenderer(_device, lf, canvasWidth, canvasHeight);
         this.smudgeRenderer    = new SmudgeRenderer(_device, lf, canvasWidth, canvasHeight);
-        this.compositeRenderer = new CompositeRenderer(_device, _format);
+        this.compositeRenderer = new CompositeRenderer(_device, _format, lf);
         this.checkpointManager = new CheckpointManager();
         this.selectionManager  = new SelectionManager(_device, _format, canvasWidth, canvasHeight);
         this.effectsPipeline   = new EffectsPipeline(_device);
