@@ -233,7 +233,7 @@ export interface BrushDescriptor {
 export function defaultBrushDescriptor(): BrushDescriptor {
     return {
         size:            0.05,
-        spacing:         0.025,
+        spacing:         0.1,
         hardness:        0.95,
         angle:           0,
         roundness:       1.0,

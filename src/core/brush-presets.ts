@@ -15,7 +15,7 @@ function makeBuiltIns(): BrushPreset[] {
     return [
         {
             id: '__soft_round', name: 'Soft Round', builtIn: true, category: 'Basic',
-            desc: { ...base, hardness: 0.0, spacing: 0.05, opacity: 0.9, pressureOpacity: 0.8 },
+            desc: { ...base, hardness: 0.0, spacing: 2, opacity: 0.9, pressureOpacity: 0.8 },
         },
     ];
 }

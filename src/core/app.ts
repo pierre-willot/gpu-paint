@@ -782,13 +782,18 @@ export class PaintApp {
 
             if (mask) {
                 // Hole = unselected pixels stay in the background.
+                // fullPixels is premultiplied (BGRA bytes are R*α, G*α, B*α, α).
+                // ALL four channels must be scaled by (1-mf) to keep valid premultiplied
+                // representation: a pixel with α=0 must also have RGB=0, otherwise
+                // the GPU blend (one / one-minus-src-alpha) adds the stale RGB to
+                // destinations even when the pixel is fully transparent → glow artefact.
                 for (let i = 0; i < W * H; i++) {
                     const i4 = i * 4;
-                    const mf = mask[i] / 255;
-                    holePixels![i4]     = fullPixels[i4];
-                    holePixels![i4 + 1] = fullPixels[i4 + 1];
-                    holePixels![i4 + 2] = fullPixels[i4 + 2];
-                    holePixels![i4 + 3] = Math.round(fullPixels[i4 + 3] * (1 - mf));
+                    const hf = 1 - mask[i] / 255;  // hole factor
+                    holePixels![i4]     = Math.round(fullPixels[i4]     * hf);
+                    holePixels![i4 + 1] = Math.round(fullPixels[i4 + 1] * hf);
+                    holePixels![i4 + 2] = Math.round(fullPixels[i4 + 2] * hf);
+                    holePixels![i4 + 3] = Math.round(fullPixels[i4 + 3] * hf);
                 }
             }
 
@@ -797,15 +802,17 @@ export class PaintApp {
                 const srcRow = cpy * W;
                 const dstRow = sy  * W;
                 for (let sx = 0; sx < W; sx++) {
-                    const cpx = mapX[sx];
-                    const ci4 = (srcRow + cpx) * 4;
-                    const si4 = (dstRow + sx)  * 4;
-                    srcPixels[si4]     = fullPixels[ci4];
-                    srcPixels[si4 + 1] = fullPixels[ci4 + 1];
-                    srcPixels[si4 + 2] = fullPixels[ci4 + 2];
-                    srcPixels[si4 + 3] = mask
-                        ? Math.round(fullPixels[ci4 + 3] * mask[srcRow + cpx] / 255)
-                        : fullPixels[ci4 + 3];
+                    const cpx  = mapX[sx];
+                    const ci4  = (srcRow + cpx) * 4;
+                    const si4  = (dstRow + sx)  * 4;
+                    // Scale ALL channels by the mask factor. fullPixels is premultiplied,
+                    // so unselected (mf=0) pixels must become [0,0,0,0] — not just α=0
+                    // with stale RGB — to avoid adding extra colour to the destination.
+                    const mf   = mask ? mask[srcRow + cpx] / 255 : 1;
+                    srcPixels[si4]     = Math.round(fullPixels[ci4]     * mf);
+                    srcPixels[si4 + 1] = Math.round(fullPixels[ci4 + 1] * mf);
+                    srcPixels[si4 + 2] = Math.round(fullPixels[ci4 + 2] * mf);
+                    srcPixels[si4 + 3] = Math.round(fullPixels[ci4 + 3] * mf);
                 }
             }
 
