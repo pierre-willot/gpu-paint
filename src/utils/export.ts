@@ -9,11 +9,11 @@ export async function textureToBytes(
     device:  GPUDevice,
     texture: GPUTexture
 ): Promise<Uint8Array> {
-    const width          = texture.width;
-    const height         = texture.height;
-    const bytesPerPixel  = 4;
-    const unpaddedPerRow = width * bytesPerPixel;
-    const paddedPerRow   = Math.ceil(unpaddedPerRow / 256) * 256;
+    const width   = texture.width;
+    const height  = texture.height;
+    const isF16   = texture.format === 'rgba16float';
+    const srcBpp  = isF16 ? 8 : 4;
+    const paddedPerRow = Math.ceil(width * srcBpp / 256) * 256;
 
     const readBuffer = device.createBuffer({
         label: 'Export Readback Buffer',
@@ -30,20 +30,46 @@ export async function textureToBytes(
     device.queue.submit([encoder.finish()]);
 
     await readBuffer.mapAsync(GPUMapMode.READ);
-    const raw    = new Uint8Array(readBuffer.getMappedRange());
-    const result = new Uint8Array(width * height * bytesPerPixel);
+    const mappedBuf = readBuffer.getMappedRange();
+    const result    = new Uint8Array(width * height * 4);
 
-    // Strip alignment padding — copy only the valid pixel bytes per row
-    for (let y = 0; y < height; y++) {
-        result.set(
-            raw.subarray(y * paddedPerRow, y * paddedPerRow + unpaddedPerRow),
-            y * unpaddedPerRow
-        );
+    if (isF16) {
+        // Decode float16 RGBA → uint8 RGBA
+        const view = new DataView(mappedBuf);
+        for (let y = 0; y < height; y++) {
+            const rowOff = y * paddedPerRow, dstOff = y * width * 4;
+            for (let x = 0; x < width; x++) {
+                const src = rowOff + x * 8, dst = dstOff + x * 4;
+                result[dst + 0] = Math.round(Math.min(1, Math.max(0, f16ToF32(view.getUint16(src + 0, true)))) * 255); // R
+                result[dst + 1] = Math.round(Math.min(1, Math.max(0, f16ToF32(view.getUint16(src + 2, true)))) * 255); // G
+                result[dst + 2] = Math.round(Math.min(1, Math.max(0, f16ToF32(view.getUint16(src + 4, true)))) * 255); // B
+                result[dst + 3] = Math.round(Math.min(1, Math.max(0, f16ToF32(view.getUint16(src + 6, true)))) * 255); // A
+            }
+        }
+    } else {
+        // Strip alignment padding — copy only the valid pixel bytes per row
+        const raw = new Uint8Array(mappedBuf);
+        const unpaddedPerRow = width * 4;
+        for (let y = 0; y < height; y++) {
+            result.set(
+                raw.subarray(y * paddedPerRow, y * paddedPerRow + unpaddedPerRow),
+                y * unpaddedPerRow
+            );
+        }
     }
 
     readBuffer.unmap();
     readBuffer.destroy();
     return result;
+}
+
+function f16ToF32(h: number): number {
+    const e = (h >> 10) & 0x1f, m = h & 0x3ff;
+    let v: number;
+    if (e === 0)       v = (m / 1024) * Math.pow(2, -14);
+    else if (e === 31) v = m ? NaN : Infinity;
+    else               v = (1 + m / 1024) * Math.pow(2, e - 15);
+    return (h >> 15) ? -v : v;
 }
 
 // ── bytesToPng ─────────────────────────────────────────────────────────────────

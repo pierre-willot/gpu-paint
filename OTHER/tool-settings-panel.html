@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tool Settings Panel — 2 Layouts</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+
+/* ── Reset ───────────────────────────────────────────────────────────────── */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+
+/* ── Tokens ──────────────────────────────────────────────────────────────── */
+:root{
+  --bg:#565b62;
+  --panel-bg:rgba(50,55,65,0.97);
+  --track-bg:rgba(22,26,34,0.85);
+  --border:rgba(255,255,255,0.09);
+  --border-hi:rgba(255,255,255,0.17);
+  --text-1:#f4f7fd;
+  --text-2:#ccd8ec;
+  --text-3:#8ea0b8;
+}
+
+/* ── Page ────────────────────────────────────────────────────────────────── */
+html{
+  min-height:100%;
+  background-color:var(--bg);
+  background-image:
+    linear-gradient(rgba(255,255,255,.08) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.08) 1px,transparent 1px),
+    linear-gradient(rgba(255,255,255,.15) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.15) 1px,transparent 1px);
+  background-size:16px 16px,16px 16px,80px 80px,80px 80px;
+}
+body{
+  min-height:100vh;
+  overflow-y:auto;
+  font-family:'DM Sans',sans-serif;
+  color:var(--text-1);
+  user-select:none;
+  display:flex;
+  align-items:flex-start;
+  justify-content:center;
+  gap:32px;
+  padding:28px 24px 48px;
+}
+
+/* ── Shared panel shell ──────────────────────────────────────────────────── */
+.panel{
+  width:283px;
+  background:var(--panel-bg);
+  border:1px solid var(--border-hi);
+  border-radius:16px;
+  backdrop-filter:blur(28px) saturate(1.3);
+  -webkit-backdrop-filter:blur(28px) saturate(1.3);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.07) inset,
+    0 12px 40px rgba(0,0,0,.45),
+    0 2px 8px rgba(0,0,0,.28);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  position:relative;
+}
+
+/* drag pill */
+.panel::before{
+  content:'';
+  position:absolute;left:50%;top:8px;transform:translateX(-50%);
+  width:22px;height:3px;
+  background:rgba(255,255,255,.15);border-radius:2px;
+  pointer-events:none;z-index:1;
+}
+
+/* ── Shared header ───────────────────────────────────────────────────────── */
+.panel-hd{
+  display:flex;align-items:center;gap:8px;
+  padding:18px 12px 10px;
+  flex-shrink:0;
+}
+.panel-title{
+  flex:1;
+  font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-2);
+}
+.close-btn{
+  width:18px;height:18px;border-radius:5px;
+  background:transparent;border:1px solid transparent;
+  color:var(--text-3);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .12s,border-color .12s,color .12s;
+}
+.close-btn:hover{border-color:var(--border-hi);background:rgba(0,0,0,.2);color:var(--text-1)}
+
+/* ── Stroke preview ──────────────────────────────────────────────────────── */
+.stroke-preview{
+  display:block;
+  width:calc(100% - 16px);
+  height:56px;
+  border-radius:9px;
+  margin:0 8px 10px;
+  flex-shrink:0;
+  background:rgba(18,21,28,.6);
+  border:1px solid rgba(255,255,255,.06);
+}
+
+/* ── Shared slider row ───────────────────────────────────────────────────── */
+.sl-row{
+  display:flex;align-items:center;gap:8px;
+  padding:0 2px;margin-bottom:5px;
+}
+.sl-row:last-child{margin-bottom:0}
+.sl-lbl{
+  font-size:11px;color:var(--text-2);
+  width:58px;flex-shrink:0;
+}
+.sl{
+  flex:1;min-width:0;height:10px;
+  -webkit-appearance:none;appearance:none;
+  background:transparent;outline:none;cursor:pointer;touch-action:none;
+}
+.sl::-webkit-slider-runnable-track{
+  height:3px;border-radius:2px;
+  background:var(--track-bg);border:1px solid rgba(255,255,255,.07);
+}
+.sl::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:12px;height:12px;border-radius:50%;
+  background:transparent;border:1.5px solid rgba(255,255,255,.85);
+  margin-top:-4.5px;
+  box-shadow:0 1px 5px rgba(0,0,0,.5);
+  cursor:grab;transition:transform .08s,border-color .08s;
+}
+.sl::-webkit-slider-thumb:hover{transform:scale(1.2);border-color:#fff}
+.sl::-webkit-slider-thumb:active{cursor:grabbing}
+.sl::-moz-range-track{height:3px;border-radius:2px;background:var(--track-bg)}
+.sl::-moz-range-thumb{
+  width:12px;height:12px;border-radius:50%;
+  background:transparent;border:1.5px solid rgba(255,255,255,.85);
+  cursor:grab;
+}
+.sl-pct{
+  font-family:'DM Mono',monospace;font-size:10px;
+  color:var(--text-3);width:32px;text-align:right;flex-shrink:0;
+}
+
+/* ── Curve icon button ───────────────────────────────────────────────────── */
+.curve-btn{
+  width:22px;height:22px;border-radius:5px;flex-shrink:0;
+  background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.1);
+  color:var(--text-3);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .12s,color .12s;
+}
+.curve-btn:hover{background:rgba(255,255,255,.08);color:var(--text-1)}
+.curve-btn svg{display:block}
+
+/* ── Curve SVG shared ────────────────────────────────────────────────────── */
+.curve-svg{ display:block; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYOUT A  —  Left vertical tab rail + right content pane
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.la-body{
+  display:flex;
+  flex:1;min-height:0;
+  overflow:hidden;
+}
+
+/* tab rail */
+.la-tabs{
+  width:74px;flex-shrink:0;
+  display:flex;flex-direction:column;gap:3px;
+  padding:6px 5px 10px;
+  border-right:1px solid var(--border);
+  background:rgba(0,0,0,.12);
+}
+.la-tab{
+  height:30px;
+  border-radius:8px;
+  border:1px solid transparent;
+  background:transparent;
+  font-family:'DM Sans',sans-serif;
+  font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--text-3);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .12s,border-color .12s,color .12s;
+}
+.la-tab:hover{background:rgba(255,255,255,.05);color:var(--text-2)}
+.la-tab.active{
+  background:rgba(0,0,0,.3);
+  border-color:var(--border-hi);
+  color:var(--text-1);
+}
+
+/* right pane */
+.la-pane{
+  flex:1;min-width:0;
+  overflow-y:auto;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(255,255,255,.25) transparent;
+  padding:10px 10px 14px;
+}
+.la-pane::-webkit-scrollbar{width:4px}
+.la-pane::-webkit-scrollbar-thumb{background:rgba(255,255,255,.25);border-radius:2px}
+.la-pane::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.4)}
+
+.la-section{display:none}
+.la-section.active{display:block}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYOUT B  —  Stacked labeled sections, all visible, body scrolls
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lb-body{
+  flex:1;min-height:0;
+  overflow-y:auto;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(255,255,255,.25) transparent;
+  display:flex;flex-direction:column;
+}
+.lb-body::-webkit-scrollbar{width:4px}
+.lb-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.25);border-radius:2px}
+.lb-body::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.4)}
+
+.sec-hd{
+  font-size:9px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;
+  color:var(--text-3);
+  background:rgba(0,0,0,.22);
+  padding:6px 12px;
+  border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.sec-hd:first-child{border-top:none}
+.sec-bd{padding:10px 12px 12px;flex-shrink:0}
+
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════ PANEL A — Tab rail + pane ════════ -->
+<div class="panel" style="height:min(580px,90vh)">
+
+  <div class="panel-hd">
+    <span class="panel-title">Brush</span>
+    <button class="close-btn" title="Close">
+      <svg width="7" height="7" viewBox="0 0 7 7" fill="none">
+        <line x1=".5" y1=".5" x2="6.5" y2="6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="6.5" y1=".5" x2=".5" y2="6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <canvas class="stroke-preview" id="previewA" width="530" height="112"></canvas>
+
+  <div class="la-body">
+    <div class="la-tabs" id="tabsA">
+      <button class="la-tab active" data-target="la-core">Core</button>
+      <button class="la-tab"        data-target="la-blend">Blend</button>
+      <button class="la-tab"        data-target="la-texture">Texture</button>
+      <button class="la-tab"        data-target="la-wetmix">Wet Mix</button>
+      <button class="la-tab"        data-target="la-dynamics">Dynamics</button>
+      <button class="la-tab"        data-target="la-shape">Shape</button>
+      <button class="la-tab"        data-target="la-scatter">Scatter</button>
+    </div>
+
+    <div class="la-pane">
+
+      <!-- CORE -->
+      <div class="la-section active" id="la-core">
+        <div class="sl-row"><span class="sl-lbl">Size</span><input type="range" class="sl" min="0" max="100" value="55" oninput="pct(this)"><span class="sl-pct">55%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Opacity</span><input type="range" class="sl" min="0" max="100" value="15" oninput="pct(this)"><span class="sl-pct">15%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Flow</span><input type="range" class="sl" min="0" max="100" value="65" oninput="pct(this)"><span class="sl-pct">65%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Hardness</span><input type="range" class="sl" min="0" max="100" value="90" oninput="pct(this)"><span class="sl-pct">90%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- BLEND -->
+      <div class="la-section" id="la-blend">
+        <div class="sl-row"><span class="sl-lbl">Pull</span><input type="range" class="sl" min="0" max="100" value="55" oninput="pct(this)"><span class="sl-pct">55%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Charge</span><input type="range" class="sl" min="0" max="100" value="15" oninput="pct(this)"><span class="sl-pct">15%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Dilution</span><input type="range" class="sl" min="0" max="100" value="65" oninput="pct(this)"><span class="sl-pct">65%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Attack</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Grade</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- TEXTURE -->
+      <div class="la-section" id="la-texture">
+        <div class="sl-row"><span class="sl-lbl">Depth</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Scale</span><input type="range" class="sl" min="10" max="400" value="100" oninput="fscale(this)"><span class="sl-pct">1.0</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Contrast</span><input type="range" class="sl" min="50" max="300" value="100" oninput="fscale(this)"><span class="sl-pct">1.0</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Rotation</span><input type="range" class="sl" min="0" max="360" value="0" oninput="fdeg(this)"><span class="sl-pct">0°</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- WET MIX -->
+      <div class="la-section" id="la-wetmix">
+        <div class="sl-row"><span class="sl-lbl">Wetness</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Paint load</span><input type="range" class="sl" min="0" max="100" value="100" oninput="pct(this)"><span class="sl-pct">100%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Wet edge</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- DYNAMICS -->
+      <div class="la-section" id="la-dynamics">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:5px">Size</div>
+        <div class="sl-row"><span class="sl-lbl">Amount</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin:8px 0 5px">Opacity</div>
+        <div class="sl-row"><span class="sl-lbl">Amount</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin:8px 0 5px">Flow</div>
+        <div class="sl-row"><span class="sl-lbl">Amount</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- SHAPE -->
+      <div class="la-section" id="la-shape">
+        <div class="sl-row"><span class="sl-lbl">Spacing</span><input type="range" class="sl" min="0.5" max="30" step="0.5" value="10" oninput="pct(this)"><span class="sl-pct">10%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Roundness</span><input type="range" class="sl" min="0" max="100" value="100" oninput="pct(this)"><span class="sl-pct">100%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Angle</span><input type="range" class="sl" min="0" max="360" value="0" oninput="fdeg(this)"><span class="sl-pct">0°</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Smoothing</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- SCATTER -->
+      <div class="la-section" id="la-scatter">
+        <div class="sl-row"><span class="sl-lbl">Scatter X</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Scatter Y</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Size jitter</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Ang jitter</span><input type="range" class="sl" min="0" max="180" value="0" oninput="fdeg(this)"><span class="sl-pct">0°</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+    </div><!-- /la-pane -->
+  </div><!-- /la-body -->
+
+</div><!-- /Panel A -->
+
+
+<!-- ══════════════════════════════════════ PANEL B — Stacked sections ════════ -->
+<div class="panel" style="height:min(580px,90vh)">
+
+  <div class="panel-hd">
+    <span class="panel-title">Brush</span>
+    <button class="close-btn" title="Close">
+      <svg width="7" height="7" viewBox="0 0 7 7" fill="none">
+        <line x1=".5" y1=".5" x2="6.5" y2="6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="6.5" y1=".5" x2=".5" y2="6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <canvas class="stroke-preview" id="previewB" width="530" height="112"></canvas>
+
+  <div class="lb-body">
+
+    <div class="sec-hd">Core</div>
+    <div class="sec-bd">
+      <div class="sl-row"><span class="sl-lbl">Size</span><input type="range" class="sl" min="0" max="100" value="55" oninput="pct(this)"><span class="sl-pct">55%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Opacity</span><input type="range" class="sl" min="0" max="100" value="15" oninput="pct(this)"><span class="sl-pct">15%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Flow</span><input type="range" class="sl" min="0" max="100" value="65" oninput="pct(this)"><span class="sl-pct">65%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Hardness</span><input type="range" class="sl" min="0" max="100" value="90" oninput="pct(this)"><span class="sl-pct">90%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+    </div>
+
+    <div class="sec-hd">Blend</div>
+    <div class="sec-bd">
+      <div class="sl-row"><span class="sl-lbl">Pull</span><input type="range" class="sl" min="0" max="100" value="55" oninput="pct(this)"><span class="sl-pct">55%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Charge</span><input type="range" class="sl" min="0" max="100" value="15" oninput="pct(this)"><span class="sl-pct">15%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Dilution</span><input type="range" class="sl" min="0" max="100" value="65" oninput="pct(this)"><span class="sl-pct">65%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Attack</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Grade</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+    </div>
+
+    <div class="sec-hd">Texture</div>
+    <div class="sec-bd">
+      <div class="sl-row"><span class="sl-lbl">Depth</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Scale</span><input type="range" class="sl" min="10" max="400" value="100" oninput="fscale(this)"><span class="sl-pct">1.0</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Contrast</span><input type="range" class="sl" min="50" max="300" value="100" oninput="fscale(this)"><span class="sl-pct">1.0</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+    </div>
+
+    <div class="sec-hd">Wet Mix</div>
+    <div class="sec-bd">
+      <div class="sl-row"><span class="sl-lbl">Wetness</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Paint load</span><input type="range" class="sl" min="0" max="100" value="100" oninput="pct(this)"><span class="sl-pct">100%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Wet edge</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+    </div>
+
+    <div class="sec-hd">Dynamics</div>
+    <div class="sec-bd">
+      <div class="sl-row"><span class="sl-lbl">Size</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Opacity</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Flow</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+    </div>
+
+    <div class="sec-hd">Shape</div>
+    <div class="sec-bd">
+      <div class="sl-row"><span class="sl-lbl">Spacing</span><input type="range" class="sl" min="0.5" max="30" step="0.5" value="10" oninput="pct(this)"><span class="sl-pct">10%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Roundness</span><input type="range" class="sl" min="0" max="100" value="100" oninput="pct(this)"><span class="sl-pct">100%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Angle</span><input type="range" class="sl" min="0" max="360" value="0" oninput="fdeg(this)"><span class="sl-pct">0°</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+    </div>
+
+    <div class="sec-hd">Scatter</div>
+    <div class="sec-bd" style="padding-bottom:18px">
+      <div class="sl-row"><span class="sl-lbl">Scatter X</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Scatter Y</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      <div class="sl-row"><span class="sl-lbl">Size jitter</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+    </div>
+
+  </div><!-- /lb-body -->
+</div><!-- /Panel B -->
+
+
+<script>
+/* ── Value formatters ────────────────────────────────────────────────── */
+function pct(sl) {
+  sl.nextElementSibling.textContent = Math.round(sl.value) + '%';
+}
+function fdeg(sl) {
+  sl.nextElementSibling.textContent = Math.round(sl.value) + '°';
+}
+function fscale(sl) {
+  sl.nextElementSibling.textContent = (sl.value / 100).toFixed(1);
+}
+
+/* ── Panel A tab switching ───────────────────────────────────────────── */
+document.getElementById('tabsA').addEventListener('click', e => {
+  const tab = e.target.closest('.la-tab');
+  if (!tab) return;
+  document.querySelectorAll('#tabsA .la-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.la-section').forEach(s => s.classList.remove('active'));
+  tab.classList.add('active');
+  document.getElementById(tab.dataset.target).classList.add('active');
+});
+
+/* ── Stroke preview ──────────────────────────────────────────────────── */
+function drawStroke(id) {
+  const c = document.getElementById(id);
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  ctx.clearRect(0, 0, W, H);
+  for (let i = 0; i <= 180; i++) {
+    const t  = i / 180;
+    const x  = 32 + t * (W - 64);
+    const y  = H / 2 + Math.sin(t * Math.PI * 1.7 + .3) * H * .2;
+    const p  = .2 + .8 * Math.sin(t * Math.PI);
+    const r  = 5 + p * 18;
+    const g  = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0,    `rgba(215,228,255,${.2  * p})`);
+    g.addColorStop(.5,   `rgba(160,195,255,${.13 * p})`);
+    g.addColorStop(1,    'rgba(80,130,220,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+drawStroke('previewA');
+drawStroke('previewB');
+</script>
+</body>
+</html>

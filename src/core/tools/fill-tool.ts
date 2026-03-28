@@ -2,6 +2,26 @@ import type { PaintPipeline }  from '../../renderer/pipeline';
 import type { BrushBlendMode } from '../../renderer/brush-descriptor';
 import type { Tool }           from '../tool';
 
+// ── Float16 helpers (needed for rgba16float layer textures) ───────────────────
+
+function decodeF16(h: number): number {
+    const e = (h >> 10) & 0x1f, m = h & 0x3ff;
+    let v: number;
+    if (e === 0)       v = (m / 1024) * Math.pow(2, -14);
+    else if (e === 31) v = m ? NaN : Infinity;
+    else               v = (1 + m / 1024) * Math.pow(2, e - 15);
+    return (h >> 15) ? -v : v;
+}
+
+function encodeF16(v: number): number {
+    v = Math.max(0, Math.min(1, v));
+    if (v === 0) return 0;
+    if (v >= 1)  return 0x3c00;
+    const e = Math.floor(Math.log2(v)), exp = e + 15;
+    if (exp <= 0) return Math.round(v / Math.pow(2, -14) * 1024) & 0x3ff;
+    return ((exp & 0x1f) << 10) | (Math.round((v / Math.pow(2, e) - 1) * 1024) & 0x3ff);
+}
+
 export class FillTool implements Tool {
     public readonly blendMode: BrushBlendMode = 'normal';
     public get isActive(): boolean { return false; }
@@ -64,11 +84,11 @@ export class FillTool implements Tool {
     private async readTexture(
         device: GPUDevice, texture: GPUTexture, w: number, h: number
     ): Promise<Uint8Array> {
-        const bytesPerRow = Math.ceil(w * 4 / 256) * 256;
-        const bufSize     = bytesPerRow * h;
+        const isF16       = texture.format === 'rgba16float';
+        const bytesPerRow = Math.ceil(w * (isF16 ? 8 : 4) / 256) * 256;
 
         const stagingBuffer = device.createBuffer({
-            size:  bufSize,
+            size:  bytesPerRow * h,
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
         });
 
@@ -81,15 +101,34 @@ export class FillTool implements Tool {
         device.queue.submit([encoder.finish()]);
 
         await stagingBuffer.mapAsync(GPUMapMode.READ);
-        const mapped = new Uint8Array(stagingBuffer.getMappedRange());
-
-        // Unpack padded rows
+        const mappedBuf = stagingBuffer.getMappedRange();
         const pixels = new Uint8Array(w * h * 4);
-        for (let row = 0; row < h; row++) {
-            pixels.set(
-                mapped.subarray(row * bytesPerRow, row * bytesPerRow + w * 4),
-                row * w * 4
-            );
+
+        if (isF16) {
+            // Decode float16 RGBA → uint8 BGRA (BGRA matches existing platform convention)
+            const view = new DataView(mappedBuf);
+            for (let row = 0; row < h; row++) {
+                const rowOff = row * bytesPerRow, dstOff = row * w * 4;
+                for (let x = 0; x < w; x++) {
+                    const src = rowOff + x * 8, dst = dstOff + x * 4;
+                    const r = decodeF16(view.getUint16(src + 0, true));
+                    const g = decodeF16(view.getUint16(src + 2, true));
+                    const b = decodeF16(view.getUint16(src + 4, true));
+                    const a = decodeF16(view.getUint16(src + 6, true));
+                    pixels[dst + 0] = Math.round(Math.min(1, Math.max(0, b)) * 255);
+                    pixels[dst + 1] = Math.round(Math.min(1, Math.max(0, g)) * 255);
+                    pixels[dst + 2] = Math.round(Math.min(1, Math.max(0, r)) * 255);
+                    pixels[dst + 3] = Math.round(Math.min(1, Math.max(0, a)) * 255);
+                }
+            }
+        } else {
+            const mapped = new Uint8Array(mappedBuf);
+            for (let row = 0; row < h; row++) {
+                pixels.set(
+                    mapped.subarray(row * bytesPerRow, row * bytesPerRow + w * 4),
+                    row * w * 4
+                );
+            }
         }
 
         stagingBuffer.unmap();
@@ -100,28 +139,40 @@ export class FillTool implements Tool {
     private async writeTexture(
         device: GPUDevice, texture: GPUTexture, pixels: Uint8Array, w: number, h: number
     ): Promise<void> {
-        const bytesPerRow = Math.ceil(w * 4 / 256) * 256;
+        const isF16 = texture.format === 'rgba16float';
 
-        // Pad rows if needed
-        let data: Uint8Array;
-        if (bytesPerRow === w * 4) {
-            data = pixels;
-        } else {
-            data = new Uint8Array(bytesPerRow * h);
+        if (isF16) {
+            // Encode uint8 BGRA → float16 RGBA
+            const bytesPerRow = Math.ceil(w * 8 / 256) * 256;
+            const buf = new ArrayBuffer(bytesPerRow * h);
+            const view = new DataView(buf);
             for (let row = 0; row < h; row++) {
-                data.set(
-                    pixels.subarray(row * w * 4, row * w * 4 + w * 4),
-                    row * bytesPerRow
-                );
+                const srcOff = row * w * 4, dstOff = row * bytesPerRow;
+                for (let x = 0; x < w; x++) {
+                    const src = srcOff + x * 4, dst = dstOff + x * 8;
+                    view.setUint16(dst + 0, encodeF16(pixels[src + 2] / 255), true); // R
+                    view.setUint16(dst + 2, encodeF16(pixels[src + 1] / 255), true); // G
+                    view.setUint16(dst + 4, encodeF16(pixels[src + 0] / 255), true); // B
+                    view.setUint16(dst + 6, encodeF16(pixels[src + 3] / 255), true); // A
+                }
             }
+            device.queue.writeTexture({ texture, origin: [0, 0, 0] }, buf, { bytesPerRow }, [w, h]);
+        } else {
+            const bytesPerRow = Math.ceil(w * 4 / 256) * 256;
+            let data: Uint8Array;
+            if (bytesPerRow === w * 4) {
+                data = pixels;
+            } else {
+                data = new Uint8Array(bytesPerRow * h);
+                for (let row = 0; row < h; row++) {
+                    data.set(
+                        pixels.subarray(row * w * 4, row * w * 4 + w * 4),
+                        row * bytesPerRow
+                    );
+                }
+            }
+            device.queue.writeTexture({ texture, origin: [0, 0, 0] }, data, { bytesPerRow }, [w, h]);
         }
-
-        device.queue.writeTexture(
-            { texture, origin: [0, 0, 0] },
-            data,
-            { bytesPerRow },
-            [w, h]
-        );
 
         await device.queue.onSubmittedWorkDone();
     }

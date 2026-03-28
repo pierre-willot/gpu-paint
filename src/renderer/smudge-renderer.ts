@@ -152,16 +152,84 @@ export class SmudgeRenderer {
         this.device.queue.writeBuffer(
             this.uniformBuffer, 0,
             new Float32Array([this.width, this.height, hardness, charge, pull, dilution, 0, 0,
-                              r, g, b, a]) // user_color at offset 32 (non-premultiplied)
+                              r, g, b, a]) // user_color at offset 32 (non-premultiplied sRGB)
         );
 
-        // Process stamps one at a time: each stamp needs its own copy→pickup→deposit
-        // cycle so the carry state is correct per-stamp.  Batching multiple stamps
-        // in a single pickup pass lets the last stamp to touch an overlapping pixel
-        // overwrite earlier stamps' carry results — all stamps in the deposit pass
-        // then read the wrong carry, causing over-accumulation and jitter artifacts.
-        for (let i = 0; i < stamps.length; i += FLOATS_PER_STAMP)
-            this.drawChunk(stamps.slice(i, i + FLOATS_PER_STAMP), layerTex, maskTex);
+        // Upload all stamp data to ring buffer in one shot.
+        const dataSize = stamps.byteLength;
+        let   ringStart = Math.ceil(this.ringOffset / 4) * 4;
+        if (ringStart + dataSize > this.ringSize) ringStart = 0;
+        this.device.queue.writeBuffer(this.ringBuffer, ringStart, stamps.buffer, stamps.byteOffset, dataSize);
+        this.ringOffset = ringStart + dataSize;
+
+        const maskView  = maskTex ? maskTex.createView() : this.dummyMaskView;
+        const layerView = layerTex.createView();
+
+        // Pre-create two views — A=carryTexture, B=scratchTexture — and 4 bind groups.
+        // Stamps alternate: even stamps treat A as carry, odd stamps treat B as carry.
+        // This avoids N*2 bind group allocations and N queue.submit() calls per stroke.
+        const viewA = this.carryTexture.createView();
+        const viewB = this.scratchTexture.createView();
+        const pickupBG_even  = this._makeBG(viewA, layerView);  // carry=A, read layer
+        const depositBG_even = this._makeBG(viewB, maskView);   // scratch=B, read mask
+        const pickupBG_odd   = this._makeBG(viewB, layerView);  // carry=B, read layer
+        const depositBG_odd  = this._makeBG(viewA, maskView);   // scratch=A, read mask
+
+        // Single command encoder for the entire batch — one queue.submit() for all stamps.
+        const enc        = this.device.createCommandEncoder();
+        const stampCount = stamps.length / FLOATS_PER_STAMP;
+
+        for (let si = 0; si < stampCount; si++) {
+            const byteOffset  = ringStart + si * BYTES_PER_STAMP;
+            const isEven      = (si & 1) === 0;
+            const singleStamp = stamps.subarray(si * FLOATS_PER_STAMP, (si + 1) * FLOATS_PER_STAMP);
+            const bbox        = this.stampPixelBBox(singleStamp);
+
+            // Which GPU texture is currently acting as carry vs scratch for this stamp.
+            const carryTex   = isEven ? this.carryTexture   : this.scratchTexture;
+            const scratchTex = isEven ? this.scratchTexture : this.carryTexture;
+            const scratchView = isEven ? viewB : viewA;
+
+            // Step 1: snapshot carry → scratch (stamp-footprint region only)
+            if (bbox) {
+                enc.copyTextureToTexture(
+                    { texture: carryTex,   origin: [bbox.x, bbox.y, 0] },
+                    { texture: scratchTex, origin: [bbox.x, bbox.y, 0] },
+                    [bbox.w, bbox.h, 1]
+                );
+            } else {
+                enc.copyTextureToTexture({ texture: carryTex }, { texture: scratchTex }, [this.width, this.height]);
+            }
+
+            // Step 2: pickup pass — update carry in scratch
+            const pickupPass = enc.beginRenderPass({
+                colorAttachments: [{ view: scratchView, loadOp: 'load', storeOp: 'store' }],
+            });
+            pickupPass.setPipeline(this.pickupPipeline);
+            if (bbox) pickupPass.setScissorRect(bbox.x, bbox.y, bbox.w, bbox.h);
+            pickupPass.setBindGroup(0, isEven ? pickupBG_even : pickupBG_odd);
+            pickupPass.setVertexBuffer(0, this.ringBuffer, byteOffset, BYTES_PER_STAMP);
+            pickupPass.draw(4, 1);
+            pickupPass.end();
+
+            // Step 3: deposit pass — blend carry onto layer
+            const depositPass = enc.beginRenderPass({
+                colorAttachments: [{ view: layerView, loadOp: 'load', storeOp: 'store' }],
+            });
+            depositPass.setPipeline(this.depositPipeline);
+            if (bbox) depositPass.setScissorRect(bbox.x, bbox.y, bbox.w, bbox.h);
+            depositPass.setBindGroup(0, isEven ? depositBG_even : depositBG_odd);
+            depositPass.setVertexBuffer(0, this.ringBuffer, byteOffset, BYTES_PER_STAMP);
+            depositPass.draw(4, 1);
+            depositPass.end();
+        }
+
+        this.device.queue.submit([enc.finish()]);
+
+        // After an odd number of stamps the carry state is in scratchTexture — swap pointers.
+        if ((stampCount & 1) === 1) {
+            [this.carryTexture, this.scratchTexture] = [this.scratchTexture, this.carryTexture];
+        }
 
         return this.stampsToDirtyRect(stamps);
     }
@@ -186,76 +254,17 @@ export class SmudgeRenderer {
 
     // ── Private ───────────────────────────────────────────────────────────────
 
-    private drawChunk(stamps: Float32Array, layerTex: GPUTexture, maskTex: GPUTexture | null): void {
-        const dataSize = stamps.byteLength;
-        let   start    = Math.ceil(this.ringOffset / 4) * 4;
-        if (start + dataSize > this.ringSize) start = 0;
-
-        this.device.queue.writeBuffer(this.ringBuffer, start, stamps.buffer, stamps.byteOffset, dataSize);
-
-        const instanceCount = stamps.length / FLOATS_PER_STAMP;
-        const maskView      = maskTex ? maskTex.createView() : this.dummyMaskView;
-        const enc           = this.device.createCommandEncoder();
-
-        // ── Step 1: snapshot carry → scratch (full canvas copy) ───────────────
-        // Ensures non-stamp-footprint regions of scratch match the current carry.
-        // The pickup pass then overwrites only stamp areas, so after the pass
-        // scratch = correct new carry state everywhere.
-        enc.copyTextureToTexture(
-            { texture: this.carryTexture  },
-            { texture: this.scratchTexture },
-            [this.width, this.height]
-        );
-
-        // ── Step 2: pickup pass — blend carry toward live layer ────────────────
-        const pickupBG = this.device.createBindGroup({
+    private _makeBG(texA: GPUTextureView, texB: GPUTextureView): GPUBindGroup {
+        return this.device.createBindGroup({
             layout: this.bindGroupLayout,
             entries: [
-                { binding: 0, resource: { buffer: this.uniformBuffer }  },
-                { binding: 1, resource: this.carryTexture.createView()  },
-                { binding: 2, resource: layerTex.createView()           },
-                { binding: 3, resource: this.texSampler                 },
-                { binding: 4, resource: this.maskSampler                },
+                { binding: 0, resource: { buffer: this.uniformBuffer } },
+                { binding: 1, resource: texA                           },
+                { binding: 2, resource: texB                           },
+                { binding: 3, resource: this.texSampler                },
+                { binding: 4, resource: this.maskSampler               },
             ],
         });
-        const pickupPass = enc.beginRenderPass({
-            colorAttachments: [{
-                view: this.scratchTexture.createView(), loadOp: 'load', storeOp: 'store',
-            }],
-        });
-        pickupPass.setPipeline(this.pickupPipeline);
-        pickupPass.setBindGroup(0, pickupBG);
-        pickupPass.setVertexBuffer(0, this.ringBuffer, start, dataSize);
-        pickupPass.draw(4, instanceCount);
-        pickupPass.end();
-
-        // ── Step 3: deposit pass — paint updated carry onto layer ─────────────
-        const depositBG = this.device.createBindGroup({
-            layout: this.bindGroupLayout,
-            entries: [
-                { binding: 0, resource: { buffer: this.uniformBuffer }   },
-                { binding: 1, resource: this.scratchTexture.createView() },
-                { binding: 2, resource: maskView                         },
-                { binding: 3, resource: this.texSampler                  },
-                { binding: 4, resource: this.maskSampler                 },
-            ],
-        });
-        const depositPass = enc.beginRenderPass({
-            colorAttachments: [{
-                view: layerTex.createView(), loadOp: 'load', storeOp: 'store',
-            }],
-        });
-        depositPass.setPipeline(this.depositPipeline);
-        depositPass.setBindGroup(0, depositBG);
-        depositPass.setVertexBuffer(0, this.ringBuffer, start, dataSize);
-        depositPass.draw(4, instanceCount);
-        depositPass.end();
-
-        this.device.queue.submit([enc.finish()]);
-        this.ringOffset = start + dataSize;
-
-        // ── Step 4: swap — scratch (updated) becomes the new carry ────────────
-        [this.carryTexture, this.scratchTexture] = [this.scratchTexture, this.carryTexture];
     }
 
     private makeCanvasTex(): GPUTexture {
@@ -296,6 +305,34 @@ export class SmudgeRenderer {
                 { shaderLocation: 6, offset: 44, format: 'float32'   }, // angle
             ],
         };
+    }
+
+    /**
+     * Per-stamp bounding box in pixel space, expanded to cover both the current
+     * stamp footprint and the prev_center (packed in color.xy by unified-brush-tool).
+     * Both positions receive the same radius so the carry→scratch copy captures
+     * everything the pickup/deposit passes need to read or write.
+     */
+    private stampPixelBBox(stamp: Float32Array): { x: number; y: number; w: number; h: number } | null {
+        const cx    = stamp[0], cy    = stamp[1];   // current center, normalized 0..1
+        const size  = stamp[3];
+        const prevX = stamp[4], prevY = stamp[5];   // prev_center packed in color.xy
+        const tiltX = stamp[8], tiltY = stamp[9];
+        const tiltMag = Math.sqrt(tiltX * tiltX + tiltY * tiltY);
+        const aspect  = 1 + (tiltMag / 90) * 2;
+        const r = size * 0.5 * aspect * 1.1;        // 10 % margin, matches stampsToDirtyRect
+
+        const minX = Math.min(cx - r, prevX - r);
+        const maxX = Math.max(cx + r, prevX + r);
+        const minY = Math.min(cy - r, prevY - r);
+        const maxY = Math.max(cy + r, prevY + r);
+
+        const px = Math.max(0,           Math.floor(minX * this.width));
+        const py = Math.max(0,           Math.floor(minY * this.height));
+        const pw = Math.min(this.width,  Math.ceil (maxX * this.width))  - px;
+        const ph = Math.min(this.height, Math.ceil (maxY * this.height)) - py;
+        if (pw <= 0 || ph <= 0) return null;
+        return { x: px, y: py, w: pw, h: ph };
     }
 
     private stampsToDirtyRect(stamps: Float32Array): DirtyRect | null {

@@ -232,9 +232,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // ── Wet mixing (canvas color pickup) ─────────────────────────────────
     if u.usePickup != 0u && u.pickupWetness > 0.0 {
         let pickupRaw = textureSampleLevel(pickupTex, pickupSmp, canvas_uv, 0.0);
-        // bgra8unorm textures on Windows/DX12: bytes are stored BGRA but WebGPU
-        // exposes them as .r=B .g=G .b=R .a=A in the sampler — swap R↔B channels.
-        let pickupColor = vec3<f32>(pickupRaw.b, pickupRaw.g, pickupRaw.r);
+        // rgba16float layer textures use RGBA channel order — no swap needed.
+        let pickupColor = pickupRaw.rgb;
         // Weight by pickup alpha so transparent canvas areas don't pull toward black.
         // On empty canvas (alpha=0) this evaluates to 0, leaving finalColor unchanged.
         let pickupStrength = u.pickupWetness * 0.7 * pickupRaw.a;

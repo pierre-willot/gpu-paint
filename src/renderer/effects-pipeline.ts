@@ -5,6 +5,38 @@
 // This avoids storage-texture format compatibility issues (bgra8unorm on Windows
 // does not support STORAGE_BINDING without optional features) and the need to
 // ship a compute shader. Performance is adequate for ≤4k canvases.
+//
+// Snapshots are always stored as Uint8Array with 4 bytes/pixel (BGRA uint8),
+// regardless of the GPU texture format. For rgba16float textures the conversion
+// is handled transparently in snapshotTexture / restoreTexture so that history,
+// undo/redo, effects, and CheckpointManager all remain format-agnostic.
+
+// ── Float16 helpers ───────────────────────────────────────────────────────────
+
+/** Decode a single IEEE 754 half-float (u16) to a JS number. */
+function decodeFloat16(h: number): number {
+    const e = (h >> 10) & 0x1f;
+    const m = h & 0x3ff;
+    let val: number;
+    if (e === 0)       val = (m / 1024) * Math.pow(2, -14);
+    else if (e === 31) val = m ? NaN : Infinity;
+    else               val = (1 + m / 1024) * Math.pow(2, e - 15);
+    return (h >> 15) ? -val : val;
+}
+
+/** Encode a JS number (clamped 0..1) to an IEEE 754 half-float u16. */
+function encodeFloat16(v: number): number {
+    v = Math.max(0, Math.min(1, v));
+    if (v === 0) return 0;
+    if (v >= 1)  return 0x3c00;                           // 1.0 exactly
+    const e = Math.floor(Math.log2(v));
+    const exp = e + 15;
+    if (exp <= 0) {                                        // subnormal
+        return Math.round(v / Math.pow(2, -14) * 1024) & 0x3ff;
+    }
+    const m = Math.round((v / Math.pow(2, e) - 1) * 1024);
+    return ((exp & 0x1f) << 10) | (m & 0x3ff);
+}
 
 export class EffectsPipeline {
     constructor(private device: GPUDevice) {}
@@ -12,12 +44,14 @@ export class EffectsPipeline {
     // ── D3 — Snapshot / Restore ───────────────────────────────────────────────
 
     /**
-     * Reads the entire texture into a CPU Uint8Array.
+     * Reads the entire texture into a CPU Uint8Array (always 4 bytes/pixel BGRA).
+     * For rgba16float textures the float values are decoded and converted to uint8.
      * Called once when an effect panel opens, stored in menu.ts.
      */
     public async snapshotTexture(texture: GPUTexture): Promise<Uint8Array> {
         const w = texture.width, h = texture.height;
-        const bytesPerRow = alignTo256(w * 4);
+        const isF16 = texture.format === 'rgba16float';
+        const bytesPerRow = alignTo256(w * (isF16 ? 8 : 4));
 
         const staging = this.device.createBuffer({
             size:  bytesPerRow * h,
@@ -29,39 +63,87 @@ export class EffectsPipeline {
         this.device.queue.submit([enc.finish()]);
 
         await staging.mapAsync(GPUMapMode.READ);
-        const mapped = new Uint8Array(staging.getMappedRange());
+        const mappedBuf = staging.getMappedRange();
         const pixels = new Uint8Array(w * h * 4);
-        for (let row = 0; row < h; row++) {
-            pixels.set(
-                mapped.subarray(row * bytesPerRow, row * bytesPerRow + w * 4),
-                row * w * 4
-            );
+
+        if (isF16) {
+            // Decode float16 RGBA → uint8 BGRA (BGRA matches bgra8unorm convention)
+            const view = new DataView(mappedBuf);
+            for (let row = 0; row < h; row++) {
+                const rowOff = row * bytesPerRow;
+                const dstOff = row * w * 4;
+                for (let x = 0; x < w; x++) {
+                    const src = rowOff + x * 8;
+                    const dst = dstOff + x * 4;
+                    const r = decodeFloat16(view.getUint16(src + 0, true));
+                    const g = decodeFloat16(view.getUint16(src + 2, true));
+                    const b = decodeFloat16(view.getUint16(src + 4, true));
+                    const a = decodeFloat16(view.getUint16(src + 6, true));
+                    pixels[dst + 0] = Math.round(Math.min(1, Math.max(0, b)) * 255);
+                    pixels[dst + 1] = Math.round(Math.min(1, Math.max(0, g)) * 255);
+                    pixels[dst + 2] = Math.round(Math.min(1, Math.max(0, r)) * 255);
+                    pixels[dst + 3] = Math.round(Math.min(1, Math.max(0, a)) * 255);
+                }
+            }
+        } else {
+            const mapped = new Uint8Array(mappedBuf);
+            for (let row = 0; row < h; row++) {
+                pixels.set(
+                    mapped.subarray(row * bytesPerRow, row * bytesPerRow + w * 4),
+                    row * w * 4
+                );
+            }
         }
+
         staging.unmap();
         staging.destroy();
         return pixels;
     }
 
     /**
-     * Writes a CPU snapshot back into a GPU texture.
+     * Writes a CPU snapshot (4 bytes/pixel BGRA) back into a GPU texture.
+     * For rgba16float textures the uint8 values are encoded back to float16.
      * Called by Cancel / Reset to undo any applied effect.
      */
     public restoreTexture(texture: GPUTexture, snapshot: Uint8Array): void {
         const w = texture.width, h = texture.height;
-        const bytesPerRow = alignTo256(w * 4);
-        let data: Uint8Array;
-        if (bytesPerRow === w * 4) {
-            data = snapshot;
-        } else {
-            data = new Uint8Array(bytesPerRow * h);
+        const isF16 = texture.format === 'rgba16float';
+
+        if (isF16) {
+            // Encode uint8 BGRA → float16 RGBA
+            const bytesPerRow = alignTo256(w * 8);
+            const buf = new ArrayBuffer(bytesPerRow * h);
+            const view = new DataView(buf);
             for (let row = 0; row < h; row++) {
-                data.set(
-                    snapshot.subarray(row * w * 4, row * w * 4 + w * 4),
-                    row * bytesPerRow
-                );
+                const srcOff = row * w * 4;
+                const dstOff = row * bytesPerRow;
+                for (let x = 0; x < w; x++) {
+                    const src = srcOff + x * 4;
+                    const dst = dstOff + x * 8;
+                    // Input is BGRA; output is RGBA float16
+                    view.setUint16(dst + 0, encodeFloat16(snapshot[src + 2] / 255), true); // R
+                    view.setUint16(dst + 2, encodeFloat16(snapshot[src + 1] / 255), true); // G
+                    view.setUint16(dst + 4, encodeFloat16(snapshot[src + 0] / 255), true); // B
+                    view.setUint16(dst + 6, encodeFloat16(snapshot[src + 3] / 255), true); // A
+                }
             }
+            this.device.queue.writeTexture({ texture, origin: [0, 0, 0] }, buf, { bytesPerRow }, [w, h]);
+        } else {
+            const bytesPerRow = alignTo256(w * 4);
+            let data: Uint8Array;
+            if (bytesPerRow === w * 4) {
+                data = snapshot;
+            } else {
+                data = new Uint8Array(bytesPerRow * h);
+                for (let row = 0; row < h; row++) {
+                    data.set(
+                        snapshot.subarray(row * w * 4, row * w * 4 + w * 4),
+                        row * bytesPerRow
+                    );
+                }
+            }
+            this.device.queue.writeTexture({ texture, origin: [0, 0, 0] }, data, { bytesPerRow }, [w, h]);
         }
-        this.device.queue.writeTexture({ texture, origin: [0, 0, 0] }, data, { bytesPerRow }, [w, h]);
     }
 
     // ── Gaussian blur ─────────────────────────────────────────────────────────

@@ -45,7 +45,7 @@ function subscribeUI(app: PaintApp, layerUI: LayerUI, toolbarUI: ToolbarUI): voi
 async function bootstrap() {
     try {
         const fps = await measureRefreshRate();
-        const { device, context, format, canvas, supportsTimestamps } = await initGPU();
+        const { device, context, format, canvas, supportsTimestamps, supportsBlendHalfFloat } = await initGPU();
 
         const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
         const w   = CANVAS_LOGICAL.width  * dpr;
@@ -60,7 +60,7 @@ async function bootstrap() {
         // ── App ───────────────────────────────────────────────────────────────
         const app = new PaintApp(canvas, device, context, format,
             { width: CANVAS_LOGICAL.width, height: CANVAS_LOGICAL.height },
-            supportsTimestamps, fps
+            supportsTimestamps, fps, supportsBlendHalfFloat
         );
         app.initBrushCursor();
 

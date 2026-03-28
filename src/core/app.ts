@@ -42,12 +42,16 @@ export class PaintApp {
 
     public  transformTool:    TransformTool;
     private transformOverlay: TransformOverlay;
-    private _transformBeforePixels: Uint8Array | null = null;
+    private _transformBeforePixels:    Uint8Array | null = null;
+    private _transformHadSelection: boolean           = false;
 
     private lastFrameTime   = 0;
     private lastFrameDelta  = 16.6;
     private idleFrameCount  = 0;
     private readonly budgetMs: number;
+    private fpsCounter      = document.getElementById('fpsCounter');
+    private fpsFrameCount   = 0;
+    private fpsAccMs        = 0;
 
     private pointerMoveQueue: QueuedMove[] = [];
     private isPointerDown              = false;
@@ -67,14 +71,15 @@ export class PaintApp {
         device:             GPUDevice,
         context:            GPUCanvasContext,
         format:             GPUTextureFormat,
-        private canvasSize: { width: number; height: number },
-        supportsTimestamps  = false,
-        fps                 = 60
+        private canvasSize:         { width: number; height: number },
+        supportsTimestamps          = false,
+        fps                         = 60,
+        supportsBlendHalfFloat      = false,
     ) {
         this.budgetMs      = (1000 / fps) * 0.85;
         this.pressureCurve = new PressureCurve(PRESSURE_PRESETS.natural);
 
-        this.pipeline = new PaintPipeline(device, context, format, canvas.width, canvas.height, supportsTimestamps);
+        this.pipeline = new PaintPipeline(device, context, format, canvas.width, canvas.height, supportsTimestamps, supportsBlendHalfFloat);
         this.nav      = new NavigationManager(canvas, () => this.updateCanvasTransform());
 
         this.history = new HistoryManager(
@@ -327,6 +332,14 @@ export class PaintApp {
         const delta = timestamp - this.lastFrameTime;
         this.lastFrameDelta = delta > 0 ? delta : this.lastFrameDelta;
         this.lastFrameTime  = timestamp;
+
+        this.fpsAccMs += this.lastFrameDelta;
+        if (++this.fpsFrameCount >= 30) {
+            const fps = Math.round(1000 / (this.fpsAccMs / this.fpsFrameCount));
+            if (this.fpsCounter) this.fpsCounter.textContent = `${fps} fps`;
+            this.fpsFrameCount = 0;
+            this.fpsAccMs      = 0;
+        }
         const overBudget = Math.max(this.lastFrameDelta, this.pipeline.lastGpuMs) > this.budgetMs;
 
         if (this.isPointerDown && this.pointerMoveQueue.length > 0) {
@@ -707,7 +720,8 @@ export class PaintApp {
         if (!layer) return;
 
         // Canvas aspect ratio for pixel-correct rotation in TransformTool.
-        this.transformTool.canvasAspect = this.pipeline.canvasWidth / this.pipeline.canvasHeight;
+        this.transformTool.canvasAspect  = this.pipeline.canvasWidth / this.pipeline.canvasHeight;
+        this._transformHadSelection      = this.pipeline.selectionManager.hasMask;
 
         if (sourcePixels && initialState) {
             // ── Caller-supplied pixels + state (image import, history replay) ──
@@ -818,6 +832,9 @@ export class PaintApp {
             afterPixels,
             timestamp:    this.history.now(),
         });
+        // Move the selection to the transformed content's new position.
+        if (this._transformHadSelection) this._applySelectionFromTransform();
+        this._transformHadSelection = false;
         this.emitStateChange();
         this.bus.emit('transform:change', { active: false });
     }
@@ -827,7 +844,30 @@ export class PaintApp {
         this.pipeline.cancelTransform(this._transformBeforePixels);
         this.transformOverlay.hide();
         this._transformBeforePixels = null;
+        this._transformHadSelection = false;
         this.bus.emit('transform:change', { active: false });
+    }
+
+    /** Recompute the selection to cover the transformed region after a commit. */
+    private _applySelectionFromTransform(): void {
+        const { cx, cy, scaleX, scaleY, rotation } = this.transformTool.state;
+        const isAxisAligned = Math.abs(rotation % 360) < 0.5;
+
+        if (isAxisAligned) {
+            this.pipeline.setRectSelection(cx - scaleX / 2, cy - scaleY / 2, scaleX, scaleY);
+        } else {
+            // Build a 4-point lasso from the rotated bounding box corners.
+            const ar  = this.pipeline.canvasWidth / this.pipeline.canvasHeight;
+            const r   = rotation * Math.PI / 180;
+            const cos = Math.cos(r), sin = Math.sin(r);
+            const hw  = scaleX / 2, hh = scaleY / 2;
+            const pts: number[] = [];
+            for (const [lx, ly] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]] as [number, number][]) {
+                pts.push(cx + lx * cos - ly * sin / ar);
+                pts.push(cy + lx * sin * ar + ly * cos);
+            }
+            this.pipeline.setLassoSelection(pts);
+        }
     }
 
     // ── Image Import (D7) ─────────────────────────────────────────────────────

@@ -1,7 +1,6 @@
 import { LayerManager, LayerState, BlendMode } from './layer-manager';
 
 export const MAX_CHECKPOINTS = 20;
-const BYTES_PER_PIXEL        = 4;
 
 // ── Exported interfaces ───────────────────────────────────────────────────────
 
@@ -169,7 +168,8 @@ export class CheckpointManager {
     private async readTexture(
         device: GPUDevice, texture: GPUTexture, width: number, height: number
     ): Promise<{ compressed: Uint8Array; bytesPerRow: number }> {
-        const bytesPerRow = Math.ceil(width * BYTES_PER_PIXEL / 256) * 256;
+        const bpp         = texture.format === 'rgba16float' ? 8 : 4;
+        const bytesPerRow = Math.ceil(width * bpp / 256) * 256;
         const readBuffer  = device.createBuffer({
             size:  bytesPerRow * height,
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ

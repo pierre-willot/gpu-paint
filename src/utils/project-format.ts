@@ -82,8 +82,10 @@ export async function serializeProject(
 
     // Render each layer texture to a PNG
     for (let i = 0; i < layers.length; i++) {
-        const raw    = await textureToBytes(device, layers[i].texture);
-        const pixels = format === 'bgra8unorm' ? swapBgraToRgba(raw) : raw;
+        const tex    = layers[i].texture;
+        const raw    = await textureToBytes(device, tex);
+        // textureToBytes returns RGBA for rgba16float; BGRA for bgra8unorm (Windows).
+        const pixels = (format === 'bgra8unorm' && tex.format !== 'rgba16float') ? swapBgraToRgba(raw) : raw;
         const png    = await bytesToPng(pixels, canvasWidth, canvasHeight);
 
         // level: 0 = store — PNG is already compressed, no benefit from deflating again
@@ -158,9 +160,10 @@ export async function serializeLayeredPngs(
     const files: Record<string, [Uint8Array, { level: 0 }]> = {};
 
     for (let i = 0; i < layers.length; i++) {
+        const tex     = layers[i].texture;
         const safe    = layers[i].name.replace(/[^a-z0-9_-]/gi, '_');
-        const raw     = await textureToBytes(device, layers[i].texture);
-        const pixels  = format === 'bgra8unorm' ? swapBgraToRgba(raw) : raw;
+        const raw     = await textureToBytes(device, tex);
+        const pixels  = (format === 'bgra8unorm' && tex.format !== 'rgba16float') ? swapBgraToRgba(raw) : raw;
         const png     = await bytesToPng(pixels, canvasWidth, canvasHeight);
         files[`${safe}.png`] = [png, { level: 0 }];
     }

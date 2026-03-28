@@ -410,4 +410,5 @@ header{
 
 /* ── Version badge ──────────────────────────────────────────────────────────── */
 #version-badge{position:fixed;bottom:8px;right:10px;font-family:'DM Mono',monospace;font-size:10px;color:var(--text-3);opacity:0.5;pointer-events:none;z-index:1;user-select:none}
+#fpsCounter{position:fixed;bottom:8px;left:10px;font-family:'DM Mono',monospace;font-size:10px;color:var(--text-3);opacity:0.5;pointer-events:none;z-index:1;user-select:none}
 

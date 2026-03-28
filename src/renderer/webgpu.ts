@@ -1,9 +1,10 @@
 export interface GPUInitResult {
-    device:             GPUDevice;
-    context:            GPUCanvasContext;
-    format:             GPUTextureFormat;
-    canvas:             HTMLCanvasElement;
-    supportsTimestamps: boolean;
+    device:                   GPUDevice;
+    context:                  GPUCanvasContext;
+    format:                   GPUTextureFormat;
+    canvas:                   HTMLCanvasElement;
+    supportsTimestamps:       boolean;
+    supportsBlendHalfFloat:   boolean;
 }
 
 /**
@@ -31,11 +32,14 @@ export async function initGPU(
         throw new Error('No WebGPU adapter found. Your browser may not support WebGPU.');
     }
 
-    const supportsTimestamps = adapter.features.has('timestamp-query');
+    const supportsTimestamps     = adapter.features.has('timestamp-query');
+    const supportsBlendHalfFloat = adapter.features.has('texture-blend-half-float');
 
-    const device = await adapter.requestDevice({
-        requiredFeatures: supportsTimestamps ? ['timestamp-query'] : []
-    });
+    const requiredFeatures: GPUFeatureName[] = [];
+    if (supportsTimestamps)     requiredFeatures.push('timestamp-query');
+    if (supportsBlendHalfFloat) requiredFeatures.push('texture-blend-half-float');
+
+    const device = await adapter.requestDevice({ requiredFeatures });
 
     device.lost.then((info) => {
         if (info.reason !== 'destroyed') {
@@ -54,5 +58,5 @@ export async function initGPU(
         alphaMode: 'premultiplied'
     });
 
-    return { device, context, format, canvas, supportsTimestamps };
+    return { device, context, format, canvas, supportsTimestamps, supportsBlendHalfFloat };
 }

@@ -97,8 +97,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     else if (layer.blendMode == 3u) { color = vec4<f32>(blend_overlay(color.rgb),  color.a); }
 
     // Encode linear layer values back to sRGB for the canvas (bgra8unorm target).
-    // Layer textures are bgra8unorm-srgb, so sampled color.rgb is already linear.
-    color = vec4<f32>(linear_to_srgb(color.rgb), color.a);
+    // Layer textures store premultiplied-like values (rgb = linear_color * alpha).
+    // Unpremultiply before sRGB encoding to avoid gamma amplifying near-zero values
+    // (which causes a glow/brightening artifact on soft transparent brush edges).
+    let a_safe = max(color.a, 0.0001);
+    let rgb_linear = select(vec3<f32>(0.0), color.rgb / a_safe, color.a > 0.0001);
+    color = vec4<f32>(linear_to_srgb(rgb_linear) * color.a, color.a);
 
     // Apply opacity: scales both RGB and alpha uniformly.
     // The GPU blend stage receives the scaled result and mixes it onto the

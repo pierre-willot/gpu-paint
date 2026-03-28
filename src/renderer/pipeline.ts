@@ -62,19 +62,23 @@ export class PaintPipeline {
     set activeLayerIndex(v: number)      { this.layerManager.activeLayerIndex = v;    }
     get device(): GPUDevice              { return this._device;                        }
     get format(): GPUTextureFormat       { return this._format;                        }
-    /** sRGB variant of the canvas format — used for all layer/carry textures so the
-     *  GPU blends in linear space while still storing compact 8-bit sRGB bytes. */
+    /** Format used for all layer/carry textures.
+     *  rgba16float gives full float precision during brush accumulation;
+     *  the composite shader encodes back to sRGB for the canvas output. */
     get layerFormat(): GPUTextureFormat  {
-        return this._format === 'bgra8unorm' ? 'bgra8unorm-srgb' : 'rgba8unorm-srgb';
+        // rgba16float requires 'texture-blend-half-float' for blend states on render attachments.
+        // Fall back to the canvas format (bgra8unorm / rgba8unorm) when unsupported.
+        return this._supportsBlendHalfFloat ? 'rgba16float' : this._format;
     }
 
     constructor(
-        private _device:      GPUDevice,
-        private context:      GPUCanvasContext,
-        private _format:      GPUTextureFormat,
-        public  canvasWidth:  number,
-        public  canvasHeight: number,
-        supportsTimestamps    = false
+        private _device:                GPUDevice,
+        private context:                GPUCanvasContext,
+        private _format:                GPUTextureFormat,
+        public  canvasWidth:            number,
+        public  canvasHeight:           number,
+        supportsTimestamps              = false,
+        private _supportsBlendHalfFloat = false,
     ) {
         const lf = this.layerFormat;
         this.layerManager      = new LayerManager(_device, lf, canvasWidth, canvasHeight);
@@ -131,15 +135,16 @@ export class PaintPipeline {
         holePixels?: Uint8Array,
     ): void {
         // Lazy-create the transform pipeline (needs format, created once).
+        // Must use layerFormat so render targets match the layer texture format.
         if (!this.transformPipelineInstance) {
-            this.transformPipelineInstance = new TransformPipeline(this._device, this._format);
+            this.transformPipelineInstance = new TransformPipeline(this._device, this.layerFormat);
         }
         this._transformLayerIdx = this.activeLayerIndex;
 
         // Source texture: stores the pre-transform pixel data in GPU memory.
         this.transformSourceTex = this._device.createTexture({
             size:   [this.canvasWidth, this.canvasHeight],
-            format: this._format,
+            format: this.layerFormat,
             usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
         });
         this.effectsPipeline.restoreTexture(this.transformSourceTex, sourcePixels);
@@ -148,7 +153,7 @@ export class PaintPipeline {
         // COPY_DST is required so the hole texture can be copied here each frame.
         this.transformPreviewTex = this._device.createTexture({
             size:   [this.canvasWidth, this.canvasHeight],
-            format: this._format,
+            format: this.layerFormat,
             usage:  GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
                   | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
         });
@@ -158,7 +163,7 @@ export class PaintPipeline {
         if (holePixels) {
             this.transformHoleTex = this._device.createTexture({
                 size:   [this.canvasWidth, this.canvasHeight],
-                format: this._format,
+                format: this.layerFormat,
                 usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
             });
             this.effectsPipeline.restoreTexture(this.transformHoleTex, holePixels);
@@ -296,14 +301,8 @@ export class PaintPipeline {
     public applyBackground(pixels: Uint8Array | null, physW: number, physH: number): void {
         if (!pixels) return;
         const layer = this.layers[0]; if (!layer) return;
-        const bpr = Math.ceil(physW * 4 / 256) * 256;
-        let data  = pixels;
-        if (bpr !== physW * 4) {
-            data = new Uint8Array(bpr * physH);
-            for (let r = 0; r < physH; r++)
-                data.set(pixels.subarray(r * physW * 4, r * physW * 4 + physW * 4), r * bpr);
-        }
-        this._device.queue.writeTexture({ texture: layer.texture }, data, { bytesPerRow: bpr }, [physW, physH]);
+        // restoreTexture handles both bgra8unorm (pad rows) and rgba16float (encode f16)
+        this.effectsPipeline.restoreTexture(layer.texture, pixels);
         this.markDirty();
     }
 

@@ -19,6 +19,12 @@
 
 const PI: f32 = 3.14159265358979;
 
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let lo = c / 12.92;
+    let hi = pow((c + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
+    return select(hi, lo, c <= vec3<f32>(0.04045));
+}
+
 struct Uniforms {
     resolution: vec2<f32>,
     hardness:   f32,
@@ -133,8 +139,8 @@ fn fs_wet_mix(in: VertexOut) -> @location(0) vec4<f32> {
     // Step B — absorb canvas into carry
     let pulled = mix(carry, layer, u.pull * mask);
 
-    // Step C — inject fresh paint (convert user_color to premultiplied)
-    let uc_pm   = vec4(u.user_color.rgb * u.user_color.a, u.user_color.a);
+    // Step C — inject fresh paint (convert sRGB user_color to linear premultiplied)
+    let uc_pm   = vec4(srgb_to_linear(u.user_color.rgb) * u.user_color.a, u.user_color.a);
     let charged = mix(pulled, uc_pm, u.charge);
 
     return charged;
