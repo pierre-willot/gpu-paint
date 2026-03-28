@@ -7,12 +7,12 @@ struct VertexOutput {
 // Packed into 16 bytes to satisfy WebGPU uniform alignment rules:
 //   bytes  0- 3 : opacity   f32  (0.0 → 1.0)
 //   bytes  4- 7 : blendMode u32  (0=normal, 1=multiply, 2=screen, 3=overlay)
-//   bytes  8-11 : padding   f32
+//   bytes  8-11 : swapRB    u32  (1 = swap R↔B channels at output)
 //   bytes 12-15 : padding   f32
 struct LayerUniforms {
     opacity:   f32,
     blendMode: u32,
-    _pad0:     f32,
+    swapRB:    u32,
     _pad1:     f32,
 };
 
@@ -42,6 +42,18 @@ fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
     out.position = vec4<f32>(pos[i], 0.0, 1.0);
     out.uv       = uv[i];
     return out;
+}
+
+// ── Color space ───────────────────────────────────────────────────────────────
+
+// Convert linear light back to sRGB for output to the canvas (bgra8unorm).
+// Layer textures are bgra8unorm-srgb, so sampling returns linear values.
+// The canvas is bgra8unorm (linear storage, displayed as sRGB by the browser),
+// so we must encode manually before writing.
+fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let lo = c * 12.92;
+    let hi = 1.055 * pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(hi, lo, c <= vec3<f32>(0.0031308));
 }
 
 // ── Blend mode functions ──────────────────────────────────────────────────────
@@ -78,14 +90,31 @@ fn blend_overlay(rgb: vec3<f32>) -> vec3<f32> {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var color = textureSample(tex, samp, in.uv);
 
-    // Apply blend mode to RGB — alpha is unaffected by blend mode.
-    // blendMode == 0u (normal): color.rgb passes through unchanged.
-    if      (layer.blendMode == 1u) { color = vec4<f32>(blend_multiply(color.rgb), color.a); }
-    else if (layer.blendMode == 2u) { color = vec4<f32>(blend_screen(color.rgb),   color.a); }
-    else if (layer.blendMode == 3u) { color = vec4<f32>(blend_overlay(color.rgb),  color.a); }
+    // Unpremultiply FIRST — blend modes must operate on non-premultiplied linear RGB.
+    // Layer textures store premultiplied values (rgb = linear_color * alpha).
+    let a_safe     = max(color.a, 0.0001);
+    let rgb_linear = select(vec3<f32>(0.0), color.rgb / a_safe, color.a > 0.0001);
+
+    // Apply blend mode to NON-PREMULTIPLIED linear RGB.
+    // blendMode == 0u (normal): passes through unchanged.
+    var blended = rgb_linear;
+    if      (layer.blendMode == 1u) { blended = blend_multiply(rgb_linear); }
+    else if (layer.blendMode == 2u) { blended = blend_screen(rgb_linear);   }
+    else if (layer.blendMode == 3u) { blended = blend_overlay(rgb_linear);  }
+
+    // Encode to sRGB and re-premultiply for the bgra8unorm canvas target.
+    let srgb_rgb = linear_to_srgb(blended);
+    color = vec4<f32>(srgb_rgb * color.a, color.a);
 
     // Apply opacity: scales both RGB and alpha uniformly.
     // The GPU blend stage receives the scaled result and mixes it onto the
     // canvas using (one, one-minus-src-alpha) — correct for pre-multiplied alpha.
-    return color * layer.opacity;
+    var out_color = color * layer.opacity;
+
+    // Swap R↔B when source is rgba16float (RGBA channel order) and target is
+    // bgra8unorm (BGRA byte order): shader .r → byte 0 (B slot), .b → byte 2 (R slot).
+    if (layer.swapRB != 0u) {
+        out_color = vec4<f32>(out_color.b, out_color.g, out_color.r, out_color.a);
+    }
+    return out_color;
 }

@@ -45,7 +45,9 @@ export class TransformPipeline {
         });
 
         // Blend pipeline: used when a hole texture provides the background.
-        // Loads dst (hole pixels), then alpha-composites transformed pixels on top.
+        // Loads dst (hole pixels), then premultiplied-alpha composites transformed
+        // pixels on top. Source texture stores premultiplied values, so srcFactor
+        // must be 'one' — using 'src-alpha' would double-apply alpha (alpha²).
         this.blendPipeline = device.createRenderPipeline({
             layout,
             vertex:   { module, entryPoint: 'vs_main' },
@@ -54,8 +56,8 @@ export class TransformPipeline {
                 targets: [{
                     format,
                     blend: {
-                        color: { operation: 'add', srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
-                        alpha: { operation: 'add', srcFactor: 'one',       dstFactor: 'one-minus-src-alpha' },
+                        color: { operation: 'add', srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+                        alpha: { operation: 'add', srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
                     },
                 }],
             },

@@ -3,12 +3,11 @@ import { HistoryManager }                          from './history-manager';
 import { NavigationManager }                       from '../input/navigation';
 import { setupPointer }                            from '../input/pointer';
 import { Tool }                                    from './tool';
-import { BrushTool }                               from './tools/brush-tool';
+import { UnifiedBrushTool }                        from './tools/unified-brush-tool';
 import { EraserTool }                              from './tools/eraser-tool';
 import { EyedropperTool }                          from './tools/eyedropper-tool';
 import { FillTool }                                from './tools/fill-tool';
 import { SelectionTool }                           from './tools/selection-tool';
-import { SmudgeTool }                              from './tools/smudge-tool';
 import { TransformTool }                           from './tools/transform-tool';
 import { TransformOverlay }                        from '../ui/overlays/transform-overlay';
 import { EventBus }                                from './event-bus';
@@ -32,9 +31,8 @@ export class PaintApp {
     public  autosave!:      AutosaveManager;
 
     private _activeTool:    Tool;
-    public  brushTool:      BrushTool;
+    public  brushTool:      UnifiedBrushTool;
     public  eraserTool:     EraserTool;
-    public  smudgeTool:     SmudgeTool;
     public  eyedropperTool: EyedropperTool;
     public  fillTool:       FillTool;
     public  selectionTool:  SelectionTool;
@@ -44,12 +42,16 @@ export class PaintApp {
 
     public  transformTool:    TransformTool;
     private transformOverlay: TransformOverlay;
-    private _transformBeforePixels: Uint8Array | null = null;
+    private _transformBeforePixels:    Uint8Array | null = null;
+    private _transformHadSelection: boolean           = false;
 
     private lastFrameTime   = 0;
     private lastFrameDelta  = 16.6;
     private idleFrameCount  = 0;
     private readonly budgetMs: number;
+    private fpsCounter      = document.getElementById('fpsCounter');
+    private fpsFrameCount   = 0;
+    private fpsAccMs        = 0;
 
     private pointerMoveQueue: QueuedMove[] = [];
     private isPointerDown              = false;
@@ -69,14 +71,15 @@ export class PaintApp {
         device:             GPUDevice,
         context:            GPUCanvasContext,
         format:             GPUTextureFormat,
-        private canvasSize: { width: number; height: number },
-        supportsTimestamps  = false,
-        fps                 = 60
+        private canvasSize:         { width: number; height: number },
+        supportsTimestamps          = false,
+        fps                         = 60,
+        supportsBlendHalfFloat      = false,
     ) {
         this.budgetMs      = (1000 / fps) * 0.85;
         this.pressureCurve = new PressureCurve(PRESSURE_PRESETS.natural);
 
-        this.pipeline = new PaintPipeline(device, context, format, canvas.width, canvas.height, supportsTimestamps);
+        this.pipeline = new PaintPipeline(device, context, format, canvas.width, canvas.height, supportsTimestamps, supportsBlendHalfFloat);
         this.nav      = new NavigationManager(canvas, () => this.updateCanvasTransform());
 
         this.history = new HistoryManager(
@@ -94,9 +97,8 @@ export class PaintApp {
             }
         );
 
-        this.brushTool      = new BrushTool();
+        this.brushTool      = new UnifiedBrushTool();
         this.eraserTool     = new EraserTool();
-        this.smudgeTool     = new SmudgeTool();
         this.eyedropperTool = new EyedropperTool(this.pipeline, this.bus);
         this.fillTool       = new FillTool();
         this.selectionTool  = new SelectionTool(canvas);
@@ -148,10 +150,30 @@ export class PaintApp {
         this.setupInputs();
     }
 
-    // Expose active tool name for bus sync
-    public get activeToolName():    string    { return this._activeTool.constructor.name; }
-    public get activeTool():        Tool      { return this._activeTool; }
-    public get activeBrushTool():   BrushTool { return this.brushTool; }
+    /** Virtual tool name — returns 'SmudgeTool'/'BrushTool' for UnifiedBrushTool based on mode. */
+    public get activeToolName(): string {
+        if (this._activeTool === this.brushTool) return this.brushTool.toolName;
+        return this._activeTool.constructor.name;
+    }
+    public get activeTool():       Tool             { return this._activeTool; }
+    public get activeBrushTool():  UnifiedBrushTool { return this.brushTool; }
+    /** Backwards-compat getter — smudge mode is now a mode of brushTool, not a separate instance. */
+    public get smudgeTool():       UnifiedBrushTool { return this.brushTool; }
+
+    /** Switch to paint mode and activate brushTool. */
+    public usePaintMode(): void {
+        this.brushTool.mode = 'paint';
+        this.setTool(this.brushTool);
+    }
+
+    /** Switch to smudge mode and activate brushTool. Auto-initialises pull to 0.8 on first use. */
+    public useSmudgeMode(): void {
+        if (this.brushTool.getDescriptor().smudge === 0) {
+            this.brushTool.getDescriptor().smudge = 0.8;
+        }
+        this.brushTool.mode = 'smudge';
+        this.setTool(this.brushTool);
+    }
 
     // ── Brush cursor ──────────────────────────────────────────────────────────
 
@@ -255,10 +277,11 @@ export class PaintApp {
     public setTool(tool: Tool): void {
         this._activeTool.reset(this.pipeline);
         this._activeTool = tool;
-        this.bus.emit('tool:change', { tool: tool.constructor.name });
 
-        const isBrushLike = tool === this.brushTool || tool === this.eraserTool || tool === this.smudgeTool;
+        const isBrushLike = tool === this.brushTool || tool === this.eraserTool;
         this.brushCursor?.setVisible(isBrushLike);
+        // Emit virtual name so isSmudge()/isBrush() checks in UI continue to work.
+        this.bus.emit('tool:change', { tool: this.activeToolName });
         this.canvas.style.cursor =
             isBrushLike                  ? 'none'
           : tool === this.eyedropperTool ? 'crosshair'
@@ -272,14 +295,12 @@ export class PaintApp {
     public setPressureCurve(lut: Float32Array): void {
         this.brushTool.setPressureLUT(lut.slice());
         this.eraserTool.setPressureLUT(lut.slice());
-        this.smudgeTool.setPressureLUT(lut.slice());
     }
 
     private pushPressureLUT(): void {
         const lut = this.pressureCurve.toLUT();
         this.brushTool.setPressureLUT(lut.slice());
         this.eraserTool.setPressureLUT(lut.slice());
-        this.smudgeTool.setPressureLUT(lut.slice());
     }
 
     // ── Events ────────────────────────────────────────────────────────────────
@@ -311,6 +332,14 @@ export class PaintApp {
         const delta = timestamp - this.lastFrameTime;
         this.lastFrameDelta = delta > 0 ? delta : this.lastFrameDelta;
         this.lastFrameTime  = timestamp;
+
+        this.fpsAccMs += this.lastFrameDelta;
+        if (++this.fpsFrameCount >= 30) {
+            const fps = Math.round(1000 / (this.fpsAccMs / this.fpsFrameCount));
+            if (this.fpsCounter) this.fpsCounter.textContent = `${fps} fps`;
+            this.fpsFrameCount = 0;
+            this.fpsAccMs      = 0;
+        }
         const overBudget = Math.max(this.lastFrameDelta, this.pipeline.lastGpuMs) > this.budgetMs;
 
         if (this.isPointerDown && this.pointerMoveQueue.length > 0) {
@@ -366,18 +395,17 @@ export class PaintApp {
                 this._hadSelectionAtPointerDown = this.pipeline.selectionManager.hasMask;
                 // Capture layer state before any painting begins (for pixel-based undo)
                 const isPaintingTool = this._activeTool === this.brushTool ||
-                                       this._activeTool === this.eraserTool ||
-                                       this._activeTool === this.smudgeTool;
+                                       this._activeTool === this.eraserTool;
                 if (isPaintingTool) {
                     const layer = this.pipeline.layerManager.getActiveLayer();
                     if (layer) {
                         this._strokeBeforePixelsPromise =
                             this.pipeline.effectsPipeline.snapshotTexture(layer.texture);
-                        // Wet mixing: GPU-to-GPU copy of layer at stroke start.
+                        // Wet mixing: GPU-to-GPU copy of layer at stroke start (paint mode only).
                         // Must be synchronous so the pickup texture is ready before the
                         // first stamp is drawn. Do NOT use the async snapshotTexture path.
-                        if (this._activeTool === this.brushTool) {
-                            const wetness = (this._activeTool as BrushTool).getDescriptor().wetness;
+                        if (this._activeTool === this.brushTool && this.brushTool.mode === 'paint') {
+                            const wetness = this.brushTool.getDescriptor().wetness;
                             if (wetness > 0) {
                                 this._pickupTexture?.destroy();
                                 this._pickupTexture = this.pipeline.device.createTexture({
@@ -433,7 +461,7 @@ export class PaintApp {
                 const c      = this.translatePoint(e.clientX, e.clientY);
                 await this._activeTool.onPointerUp(c.x, c.y, p, this.pipeline);
 
-                if (this._activeTool === this.smudgeTool) {
+                if (this._activeTool === this.brushTool && this.brushTool.mode === 'smudge') {
                     const layer = this.pipeline.layerManager.getActiveLayer();
                     if (layer && this._strokeBeforePixelsPromise && this.pipeline.hadPaintingSinceReset) {
                         const [beforePixels, afterPixels] = await Promise.all([
@@ -503,7 +531,6 @@ export class PaintApp {
 
     public setBrushSize(size: number): void {
         this.brushTool.setSize(size);
-        this.smudgeTool.setSize(size);
         this.pipeline.updateUniforms(this.canvas.width, this.canvas.height, size);
         this.brushCursor?.setSize(size);
         this.bus.emit('brush:change', { size, color: Array.from(this.activeBrushTool.getCurrentColor()) });
@@ -693,7 +720,8 @@ export class PaintApp {
         if (!layer) return;
 
         // Canvas aspect ratio for pixel-correct rotation in TransformTool.
-        this.transformTool.canvasAspect = this.pipeline.canvasWidth / this.pipeline.canvasHeight;
+        this.transformTool.canvasAspect  = this.pipeline.canvasWidth / this.pipeline.canvasHeight;
+        this._transformHadSelection      = this.pipeline.selectionManager.hasMask;
 
         if (sourcePixels && initialState) {
             // ── Caller-supplied pixels + state (image import, history replay) ──
@@ -754,13 +782,18 @@ export class PaintApp {
 
             if (mask) {
                 // Hole = unselected pixels stay in the background.
+                // fullPixels is premultiplied (BGRA bytes are R*α, G*α, B*α, α).
+                // ALL four channels must be scaled by (1-mf) to keep valid premultiplied
+                // representation: a pixel with α=0 must also have RGB=0, otherwise
+                // the GPU blend (one / one-minus-src-alpha) adds the stale RGB to
+                // destinations even when the pixel is fully transparent → glow artefact.
                 for (let i = 0; i < W * H; i++) {
                     const i4 = i * 4;
-                    const mf = mask[i] / 255;
-                    holePixels![i4]     = fullPixels[i4];
-                    holePixels![i4 + 1] = fullPixels[i4 + 1];
-                    holePixels![i4 + 2] = fullPixels[i4 + 2];
-                    holePixels![i4 + 3] = Math.round(fullPixels[i4 + 3] * (1 - mf));
+                    const hf = 1 - mask[i] / 255;  // hole factor
+                    holePixels![i4]     = Math.round(fullPixels[i4]     * hf);
+                    holePixels![i4 + 1] = Math.round(fullPixels[i4 + 1] * hf);
+                    holePixels![i4 + 2] = Math.round(fullPixels[i4 + 2] * hf);
+                    holePixels![i4 + 3] = Math.round(fullPixels[i4 + 3] * hf);
                 }
             }
 
@@ -769,15 +802,17 @@ export class PaintApp {
                 const srcRow = cpy * W;
                 const dstRow = sy  * W;
                 for (let sx = 0; sx < W; sx++) {
-                    const cpx = mapX[sx];
-                    const ci4 = (srcRow + cpx) * 4;
-                    const si4 = (dstRow + sx)  * 4;
-                    srcPixels[si4]     = fullPixels[ci4];
-                    srcPixels[si4 + 1] = fullPixels[ci4 + 1];
-                    srcPixels[si4 + 2] = fullPixels[ci4 + 2];
-                    srcPixels[si4 + 3] = mask
-                        ? Math.round(fullPixels[ci4 + 3] * mask[srcRow + cpx] / 255)
-                        : fullPixels[ci4 + 3];
+                    const cpx  = mapX[sx];
+                    const ci4  = (srcRow + cpx) * 4;
+                    const si4  = (dstRow + sx)  * 4;
+                    // Scale ALL channels by the mask factor. fullPixels is premultiplied,
+                    // so unselected (mf=0) pixels must become [0,0,0,0] — not just α=0
+                    // with stale RGB — to avoid adding extra colour to the destination.
+                    const mf   = mask ? mask[srcRow + cpx] / 255 : 1;
+                    srcPixels[si4]     = Math.round(fullPixels[ci4]     * mf);
+                    srcPixels[si4 + 1] = Math.round(fullPixels[ci4 + 1] * mf);
+                    srcPixels[si4 + 2] = Math.round(fullPixels[ci4 + 2] * mf);
+                    srcPixels[si4 + 3] = Math.round(fullPixels[ci4 + 3] * mf);
                 }
             }
 
@@ -804,6 +839,9 @@ export class PaintApp {
             afterPixels,
             timestamp:    this.history.now(),
         });
+        // Move the selection to the transformed content's new position.
+        if (this._transformHadSelection) this._applySelectionFromTransform();
+        this._transformHadSelection = false;
         this.emitStateChange();
         this.bus.emit('transform:change', { active: false });
     }
@@ -813,7 +851,30 @@ export class PaintApp {
         this.pipeline.cancelTransform(this._transformBeforePixels);
         this.transformOverlay.hide();
         this._transformBeforePixels = null;
+        this._transformHadSelection = false;
         this.bus.emit('transform:change', { active: false });
+    }
+
+    /** Recompute the selection to cover the transformed region after a commit. */
+    private _applySelectionFromTransform(): void {
+        const { cx, cy, scaleX, scaleY, rotation } = this.transformTool.state;
+        const isAxisAligned = Math.abs(rotation % 360) < 0.5;
+
+        if (isAxisAligned) {
+            this.pipeline.setRectSelection(cx - scaleX / 2, cy - scaleY / 2, scaleX, scaleY);
+        } else {
+            // Build a 4-point lasso from the rotated bounding box corners.
+            const ar  = this.pipeline.canvasWidth / this.pipeline.canvasHeight;
+            const r   = rotation * Math.PI / 180;
+            const cos = Math.cos(r), sin = Math.sin(r);
+            const hw  = scaleX / 2, hh = scaleY / 2;
+            const pts: number[] = [];
+            for (const [lx, ly] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]] as [number, number][]) {
+                pts.push(cx + lx * cos - ly * sin / ar);
+                pts.push(cy + lx * sin * ar + ly * cos);
+            }
+            this.pipeline.setLassoSelection(pts);
+        }
     }
 
     // ── Image Import (D7) ─────────────────────────────────────────────────────

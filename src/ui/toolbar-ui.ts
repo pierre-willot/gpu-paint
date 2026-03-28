@@ -112,7 +112,7 @@ export class ToolbarUI {
 
         brushBtn?.addEventListener('click', () => {
             if (this.app.activeToolName === 'BrushTool') this.onToolSettingsOpen?.();
-            this.app.setTool(this.app.brushTool);
+            this.app.usePaintMode();
             setActive(brushBtn);
         });
         eraserBtn?.addEventListener('click', () => {
@@ -122,7 +122,7 @@ export class ToolbarUI {
         });
         smudgeBtn?.addEventListener('click', () => {
             openSettingsIfActive('SmudgeTool');
-            this.app.setTool(this.app.smudgeTool);
+            this.app.useSmudgeMode();
             setActive(smudgeBtn);
         });
         eyedropperBtn?.addEventListener('click', () => {
@@ -191,9 +191,9 @@ export class ToolbarUI {
             if ((ctrl && key === 'y') || (ctrl && e.shiftKey && key === 'z')) { e.preventDefault(); await this.app.history.redo(); }
 
             // Tools
-            if (!ctrl && key === 'b') this.app.setTool(this.app.activeBrushTool);
+            if (!ctrl && key === 'b') this.app.usePaintMode();
             if (!ctrl && key === 'e') this.app.setTool(this.app.eraserTool);
-            if (!ctrl && key === 'm') this.app.setTool(this.app.smudgeTool);
+            if (!ctrl && key === 'm') this.app.useSmudgeMode();
             if (!ctrl && key === 'i') this.app.setTool(this.app.eyedropperTool);
             if (!ctrl && key === 'g') this.app.setTool(this.app.fillTool);
             if (!ctrl && key === 'r') this.app.setTool(this.app.selectionTool);

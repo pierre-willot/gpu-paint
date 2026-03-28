@@ -233,7 +233,7 @@ export interface BrushDescriptor {
 export function defaultBrushDescriptor(): BrushDescriptor {
     return {
         size:            0.05,
-        spacing:         0.10,
+        spacing:         0.1,
         hardness:        0.95,
         angle:           0,
         roundness:       1.0,
@@ -324,7 +324,7 @@ export function defaultBrushDescriptor(): BrushDescriptor {
         blendMode:            'normal',
         smudge:          0,
         smudgeCharge:    0.8,
-        smudgeDilution:  0,
+        smudgeDilution:  1.0,
         smudgeAttack:    0,
         smudgeGrade:     0,
     };

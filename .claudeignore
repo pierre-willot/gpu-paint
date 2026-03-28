@@ -1,0 +1,52 @@
+.cache/
+.git/
+
+# --- Dependencies & Build Artifacts ---
+node_modules/
+dist/
+build/
+.next/
+.out/
+vendor/
+bin/
+obj/
+
+# --- Large/Auto-generated Files (Token Eaters) ---
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+*.min.js
+*.min.css
+*.map
+*.pyc
+
+# --- Media & Assets (Claude can't "read" these via CLI anyway) ---
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+*.mp4
+*.pdf
+*.zip
+*.tar.gz
+
+# --- Database & Logs ---
+*.log
+*.sqlite
+*.db
+dump.sql
+.vercel/
+.turbo/
+
+# --- Environment & Secrets ---
+.env*
+.secrets
+*.pem
+*.key
+
+# --- Documentation/Large Metadata ---
+.git/
+.svn/
+.hg/

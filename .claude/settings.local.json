@@ -7,7 +7,9 @@
       "Bash(npx tsc:*)",
       "Bash(npx vite:*)",
       "Bash(grep -rn \"cmd\\\\.stamps\\\\|cmd\\\\.pixels\\\\|cmd\\\\.blendMode\\\\|cmd\\\\.floatsPerStamp\\\\|cmd\\\\.selMode\\\\|\\\\.stampsBuffer\\\\|\\\\.pixelsBuffer\\\\|\\\\.blendMode\\\\b\\\\|\\\\.floatsPerStamp\" src/ --include=*.ts)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(grep -r \"float16\\\\|Float16\\\\|f16\" /d/Github/gpu-paint/src --include=*.ts --include=*.wgsl)",
+      "Bash(find /d/Github/gpu-paint/src/renderer -name *dirty* -o -name *region*)"
     ]
   }
 }

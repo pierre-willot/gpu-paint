@@ -21,6 +21,7 @@ export class CompositeRenderer {
 
     private uniformBuffer: GPUBuffer;
     private uniformStride: number;
+    private swapRB:        boolean;
 
     // 1×1 fully opaque white texture.
     // Used to "paint white" over the dirty region when compositing with a
@@ -31,7 +32,12 @@ export class CompositeRenderer {
 
     private bindGroupCache = new WeakMap<GPUTexture, GPUBindGroup>();
 
-    constructor(private device: GPUDevice, format: GPUTextureFormat) {
+    constructor(
+        private device: GPUDevice,
+        format:         GPUTextureFormat,
+        layerFormat:    GPUTextureFormat = format
+    ) {
+        this.swapRB = (layerFormat === 'rgba16float' && format === 'bgra8unorm');
         const alignment    = device.limits.minUniformBufferOffsetAlignment;
         this.uniformStride = Math.ceil(16 / alignment) * alignment;
 
@@ -154,13 +160,13 @@ export class CompositeRenderer {
         for (let i = 0; i < layers.length; i++) {
             const layer = layers[i];
             if (!layer.visible) continue;
-            this.writeUniformSlot(i, layer.opacity, layer.blendMode);
+            this.writeUniformSlot(i, layer.opacity, layer.blendMode, this.swapRB);
             visibleLayers.push({ layer, slot: i });
         }
 
-        this.writeUniformSlot(OVERLAY_SLOT, 1.0, 'normal');
-        // BG_SLOT: opacity=1, normal blend — makes white texture output solid white
-        this.writeUniformSlot(BG_SLOT, 1.0, 'normal');
+        this.writeUniformSlot(OVERLAY_SLOT, 1.0, 'normal', this.swapRB);
+        // BG_SLOT: white texture — channel-agnostic, no swap needed
+        this.writeUniformSlot(BG_SLOT, 1.0, 'normal', false);
 
         const encoder = this.device.createCommandEncoder();
         const usingScissor = scissorRect !== null;
@@ -283,13 +289,14 @@ export class CompositeRenderer {
     private writeUniformSlot(
         slot:      number,
         opacity:   number,
-        blendMode: BlendMode | 'normal'
+        blendMode: BlendMode | 'normal',
+        swapRB:    boolean = false
     ): void {
         const data = new ArrayBuffer(16);
         const dv   = new DataView(data);
         dv.setFloat32(0,  opacity,                                       true);
         dv.setUint32 (4,  BLEND_MODE_INDEX[blendMode as BlendMode] ?? 0, true);
-        dv.setFloat32(8,  0,                                             true);
+        dv.setUint32 (8,  swapRB ? 1 : 0,                               true);
         dv.setFloat32(12, 0,                                             true);
         this.device.queue.writeBuffer(this.uniformBuffer, slot * this.uniformStride, data);
     }

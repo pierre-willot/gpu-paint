@@ -62,23 +62,33 @@ export class PaintPipeline {
     set activeLayerIndex(v: number)      { this.layerManager.activeLayerIndex = v;    }
     get device(): GPUDevice              { return this._device;                        }
     get format(): GPUTextureFormat       { return this._format;                        }
+    /** Format used for all layer/carry textures.
+     *  rgba16float gives full float precision during brush accumulation;
+     *  the composite shader encodes back to sRGB for the canvas output. */
+    get layerFormat(): GPUTextureFormat  {
+        // rgba16float requires 'texture-blend-half-float' for blend states on render attachments.
+        // Fall back to the canvas format (bgra8unorm / rgba8unorm) when unsupported.
+        return this._supportsBlendHalfFloat ? 'rgba16float' : this._format;
+    }
 
     constructor(
-        private _device:      GPUDevice,
-        private context:      GPUCanvasContext,
-        private _format:      GPUTextureFormat,
-        public  canvasWidth:  number,
-        public  canvasHeight: number,
-        supportsTimestamps    = false
+        private _device:                GPUDevice,
+        private context:                GPUCanvasContext,
+        private _format:                GPUTextureFormat,
+        public  canvasWidth:            number,
+        public  canvasHeight:           number,
+        supportsTimestamps              = false,
+        private _supportsBlendHalfFloat = false,
     ) {
-        this.layerManager      = new LayerManager(_device, _format, canvasWidth, canvasHeight);
-        this.brushRenderer     = new BrushRenderer(_device, _format, canvasWidth, canvasHeight);
-        this.smudgeRenderer    = new SmudgeRenderer(_device, _format, canvasWidth, canvasHeight);
-        this.compositeRenderer = new CompositeRenderer(_device, _format);
+        const lf = this.layerFormat;
+        this.layerManager      = new LayerManager(_device, lf, canvasWidth, canvasHeight);
+        this.brushRenderer     = new BrushRenderer(_device, lf, canvasWidth, canvasHeight);
+        this.smudgeRenderer    = new SmudgeRenderer(_device, lf, canvasWidth, canvasHeight);
+        this.compositeRenderer = new CompositeRenderer(_device, _format, lf);
         this.checkpointManager = new CheckpointManager();
         this.selectionManager  = new SelectionManager(_device, _format, canvasWidth, canvasHeight);
         this.effectsPipeline   = new EffectsPipeline(_device);
-        this.overlayTexture    = createPersistentTexture(_device, canvasWidth, canvasHeight, _format);
+        this.overlayTexture    = createPersistentTexture(_device, canvasWidth, canvasHeight, lf);
 
         this.backingTexture = _device.createTexture({
             size:   [canvasWidth, canvasHeight],
@@ -125,15 +135,16 @@ export class PaintPipeline {
         holePixels?: Uint8Array,
     ): void {
         // Lazy-create the transform pipeline (needs format, created once).
+        // Must use layerFormat so render targets match the layer texture format.
         if (!this.transformPipelineInstance) {
-            this.transformPipelineInstance = new TransformPipeline(this._device, this._format);
+            this.transformPipelineInstance = new TransformPipeline(this._device, this.layerFormat);
         }
         this._transformLayerIdx = this.activeLayerIndex;
 
         // Source texture: stores the pre-transform pixel data in GPU memory.
         this.transformSourceTex = this._device.createTexture({
             size:   [this.canvasWidth, this.canvasHeight],
-            format: this._format,
+            format: this.layerFormat,
             usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
         });
         this.effectsPipeline.restoreTexture(this.transformSourceTex, sourcePixels);
@@ -142,7 +153,7 @@ export class PaintPipeline {
         // COPY_DST is required so the hole texture can be copied here each frame.
         this.transformPreviewTex = this._device.createTexture({
             size:   [this.canvasWidth, this.canvasHeight],
-            format: this._format,
+            format: this.layerFormat,
             usage:  GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
                   | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
         });
@@ -152,7 +163,7 @@ export class PaintPipeline {
         if (holePixels) {
             this.transformHoleTex = this._device.createTexture({
                 size:   [this.canvasWidth, this.canvasHeight],
-                format: this._format,
+                format: this.layerFormat,
                 usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
             });
             this.effectsPipeline.restoreTexture(this.transformHoleTex, holePixels);
@@ -276,7 +287,7 @@ export class PaintPipeline {
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING |
                    GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST
         });
-        this.overlayTexture = createPersistentTexture(this._device, physW, physH, this._format);
+        this.overlayTexture = createPersistentTexture(this._device, physW, physH, this.layerFormat);
 
         this.brushRenderer.updateResolution(physW, physH);
         this.smudgeRenderer.updateResolution(physW, physH);
@@ -290,14 +301,8 @@ export class PaintPipeline {
     public applyBackground(pixels: Uint8Array | null, physW: number, physH: number): void {
         if (!pixels) return;
         const layer = this.layers[0]; if (!layer) return;
-        const bpr = Math.ceil(physW * 4 / 256) * 256;
-        let data  = pixels;
-        if (bpr !== physW * 4) {
-            data = new Uint8Array(bpr * physH);
-            for (let r = 0; r < physH; r++)
-                data.set(pixels.subarray(r * physW * 4, r * physW * 4 + physW * 4), r * bpr);
-        }
-        this._device.queue.writeTexture({ texture: layer.texture }, data, { bytesPerRow: bpr }, [physW, physH]);
+        // restoreTexture handles both bgra8unorm (pad rows) and rgba16float (encode f16)
+        this.effectsPipeline.restoreTexture(layer.texture, pixels);
         this.markDirty();
     }
 
@@ -398,14 +403,14 @@ export class PaintPipeline {
 
     // ── Smudge ────────────────────────────────────────────────────────────────
 
-    /** Seeds the smudge carry texture from the active layer. Call at stroke start. */
+    /** Seeds the wet-brush carry texture from the active layer. Call at stroke start. */
     public beginSmudgeStroke(): void {
         const layer = this.layerManager.getActiveLayer();
         if (!layer) return;
         this.smudgeRenderer.beginStroke(layer.texture);
     }
 
-    /** Two-pass GPU smudge render (pickup + deposit). Call from SmudgeTool.drawToLayer. */
+    /** Two-pass GPU wet-brush render (wet_mix + deposit). Call from UnifiedBrushTool.drawToLayer. */
     public drawSmudge(stamps: Float32Array, descriptor: BrushDescriptor): void {
         if (!stamps.length) return;
         this.hadPaintingSinceReset = true;
@@ -417,7 +422,8 @@ export class PaintPipeline {
             descriptor.smudge,         // pull
             descriptor.smudgeCharge,   // charge
             descriptor.smudgeDilution, // dilution
-            descriptor.hardness
+            descriptor.hardness,
+            descriptor.color,          // user_color
         );
         this.expandDirtyRect(rect);
         this.needsRedraw = true;

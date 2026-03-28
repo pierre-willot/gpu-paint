@@ -16,6 +16,25 @@
 
 const PI: f32 = 3.14159265358979;
 
+// ── Color space helpers ───────────────────────────────────────────────────────
+
+// Convert sRGB-encoded value to linear light.
+// Stamp colors from the descriptor are sRGB; layer textures are bgra8unorm-srgb
+// (render attachment) so the GPU expects linear input and converts on write.
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let lo = c / 12.92;
+    let hi = pow((c + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(hi, lo, c <= vec3<f32>(0.04045));
+}
+
+// Hash-based triangular dither — spreads 8-bit alpha quantisation error spatially.
+// Two uniform hashes subtracted → triangular distribution ≈ ±0.5/255.
+fn dither(pos: vec2<f32>) -> f32 {
+    let h  = fract(sin(dot(pos, vec2<f32>(127.1, 311.7))) * 43758.5453);
+    let h2 = fract(sin(dot(pos + 0.5, vec2<f32>(269.5, 183.3))) * 47853.5453);
+    return (h + h2 - 1.0) / 255.0;
+}
+
 struct VertexOut {
     @builtin(position) position:      vec4<f32>,
     @location(0)       uv:            vec2<f32>,
@@ -161,7 +180,9 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     var alpha = alpha_base * in.color.a * mask_val;
 
     // ── Color + grain ─────────────────────────────────────────────────────
-    var finalColor = in.color.rgb;
+    // Convert sRGB descriptor color to linear — layer textures are bgra8unorm-srgb
+    // so the GPU expects linear input and handles the encode-on-write automatically.
+    var finalColor = srgb_to_linear(in.color.rgb);
 
     if u.grainDepth > 0.001 {
         var grainUV: vec2<f32>;
@@ -211,14 +232,16 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // ── Wet mixing (canvas color pickup) ─────────────────────────────────
     if u.usePickup != 0u && u.pickupWetness > 0.0 {
         let pickupRaw = textureSampleLevel(pickupTex, pickupSmp, canvas_uv, 0.0);
-        // bgra8unorm textures on Windows/DX12: bytes are stored BGRA but WebGPU
-        // exposes them as .r=B .g=G .b=R .a=A in the sampler — swap R↔B channels.
-        let pickupColor = vec3<f32>(pickupRaw.b, pickupRaw.g, pickupRaw.r);
+        // rgba16float layer textures use RGBA channel order — no swap needed.
+        let pickupColor = pickupRaw.rgb;
         // Weight by pickup alpha so transparent canvas areas don't pull toward black.
         // On empty canvas (alpha=0) this evaluates to 0, leaving finalColor unchanged.
         let pickupStrength = u.pickupWetness * 0.7 * pickupRaw.a;
         finalColor = mix(finalColor, pickupColor, pickupStrength);
     }
+
+    // Dither alpha to break 8-bit quantisation banding at low stamp opacity.
+    alpha = clamp(alpha + dither(in.position.xy), 0.0, 1.0);
 
     // Return NON-PREMULTIPLIED. The blend state is src-alpha / one-minus-src-alpha.
     return vec4<f32>(finalColor, alpha);
