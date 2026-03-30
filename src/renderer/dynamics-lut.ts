@@ -1,7 +1,7 @@
 // ── DynamicsLUT — curve-to-LUT conversion and packed dynamics buffer ──────────
 //
 // All per-stamp dynamic modifiers are encoded as 256-entry Float32Array LUTs.
-// `buildDynamicsLUTs` packs all 12 LUTs into one Float32Array(3072) that is
+// `buildDynamicsLUTs` packs all 9 LUTs into one Float32Array(2304) that is
 // transferred as a single transferable to the stroke worker.
 
 import type { CurveSpec }       from './brush-descriptor';
@@ -16,12 +16,9 @@ export const DLUT_OPACITY_SPEED     =  4;
 export const DLUT_FLOW_PRESSURE     =  5;
 export const DLUT_ROUNDNESS_TILT    =  6;
 export const DLUT_ROUNDNESS_PRESSURE=  7;
-export const DLUT_SCATTER_PRESSURE  =  8;
-export const DLUT_GRAIN_DEPTH       =  9;
-export const DLUT_WETNESS_PRESSURE  = 10;
-export const DLUT_COLOR_MIX         = 11;
-export const NUM_DLUTS              = 12;
-export const DLUT_TOTAL_FLOATS      = NUM_DLUTS * 256; // 3072
+export const DLUT_WETNESS_PRESSURE  =  8;
+export const NUM_DLUTS              =  9;
+export const DLUT_TOTAL_FLOATS      = NUM_DLUTS * 256; // 2304
 
 // ── Public utilities ──────────────────────────────────────────────────────────
 
@@ -77,10 +74,7 @@ export function buildDynamicsLUTs(d: BrushDescriptor): Float32Array {
     fill(DLUT_FLOW_PRESSURE,      d.flowPressureCurve);
     fill(DLUT_ROUNDNESS_TILT,     d.roundnessTiltCurve);
     fill(DLUT_ROUNDNESS_PRESSURE, d.roundnessPressureCurve);
-    fill(DLUT_SCATTER_PRESSURE,   d.scatterPressureCurve);
-    fill(DLUT_GRAIN_DEPTH,        d.grainDepthCurve);
     fill(DLUT_WETNESS_PRESSURE,   d.wetnessPressureCurve);
-    fill(DLUT_COLOR_MIX,          d.colorMixPressureCurve);
 
     return packed;
 }

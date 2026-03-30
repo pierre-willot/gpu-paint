@@ -53,7 +53,10 @@ export class PaintPipeline {
     public  currentBrushSize  = 0.05;
     /** Set by draw()/drawSmudge() — checked in app.ts to decide whether to push to history. */
     public hadPaintingSinceReset = false;
-    public resetPaintingFlag(): void { this.hadPaintingSinceReset = false; }
+    public resetPaintingFlag(): void {
+        this.hadPaintingSinceReset = false;
+        this.brushRenderer.resetGlazeStroke();
+    }
     /** Fill color [r,g,b,a] in 0–255 range, updated by app.setBrushColor(). */
     public  currentFillColor: [number, number, number, number] = [0, 0, 0, 255];
 
@@ -323,6 +326,11 @@ export class PaintPipeline {
     private syncMask(): void {
         const tex = this.selectionManager.hasMask ? this.selectionManager.getMaskTexture() : null;
         this.brushRenderer.setMaskTexture(tex);
+    }
+
+    public setTipTexture(tex: GPUTexture | null): void {
+        this.brushRenderer.setTipTexture(tex);
+        this.smudgeRenderer.setTipTexture(tex);
     }
 
     // ── Direct undo / redo (pixel-based — no replay needed) ──────────────────

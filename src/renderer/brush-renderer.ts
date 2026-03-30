@@ -1,6 +1,19 @@
 import { PipelineCache, BrushBlendMode, BrushPipelineConfig, FLOATS_PER_STAMP, BYTES_PER_STAMP } from './pipeline-cache';
+import glazeAccumSrc   from './shaders/glaze-accum.wgsl?raw';
+import glazeDepositSrc from './shaders/glaze-deposit.wgsl?raw';
+import type { GlazeMode } from './brush-descriptor';
 
 export interface DirtyRect { x: number; y: number; width: number; height: number; }
+
+function mergeDirtyRects(a: DirtyRect | null, b: DirtyRect | null): DirtyRect | null {
+    if (!a) return b;
+    if (!b) return a;
+    const x  = Math.min(a.x, b.x);
+    const y  = Math.min(a.y, b.y);
+    const x2 = Math.max(a.x + a.width,  b.x + b.width);
+    const y2 = Math.max(a.y + a.height, b.y + b.height);
+    return { x, y, width: x2 - x, height: y2 - y };
+}
 
 // Uniform buffer layout — 64 bytes (matches brush.wgsl Uniforms struct)
 // [0]  resolution.x  f32
@@ -48,6 +61,7 @@ export class BrushRenderer {
     private activeGrainView:        GPUTextureView | null = null;
     private proceduralGrainTexture: GPUTexture | null = null;
     private grainLibrary:           GPUTexture[]          = [];
+    private grainPixelData:         Uint8Array[]          = [];
 
     // ── Tip state ─────────────────────────────────────────────────────────────
     private dummyTipTexture:  GPUTexture;
@@ -71,12 +85,37 @@ export class BrushRenderer {
     private ringBufferSize  = 1024 * 1024 * 4; // 4 MB
     private currentOffset   = 0;
 
+    // ── Glaze accumulation state ──────────────────────────────────────────────
+    private layerFormat:            GPUTextureFormat  = 'rgba8unorm';
+    private glazeMode:              GlazeMode         = 'off';
+    private glazeStrokeActive                         = false;
+
+    private glazeBuffer:            GPUTexture        | null = null;
+    private glazeBufferView:        GPUTextureView    | null = null;
+    private strokeBaseLayer:        GPUTexture        | null = null;
+    private strokeBaseView:         GPUTextureView    | null = null;
+
+    private glazeAccumPipeline:     GPURenderPipeline | null = null;
+    private glazeDepositPipeline:   GPURenderPipeline | null = null;
+
+    private glazeAccumBGL:          GPUBindGroupLayout | null = null;
+    private glazeDepositBGL:        GPUBindGroupLayout | null = null;
+
+    // Accumulation uniform: resolution(2) + hardness(1) + useTipTex(1) = 16 bytes
+    private glazeAccumUniforms:     GPUBuffer         | null = null;
+    // Deposit uniform: resolution(2) + glazeMode(1 u32) + _pad(1) + brushColor(4) = 32 bytes
+    private glazeDepositUniforms:   GPUBuffer         | null = null;
+
+    // Sampler shared by both glaze passes
+    private glazeSampler:           GPUSampler        | null = null;
+
     constructor(
         private device:       GPUDevice,
         format:               GPUTextureFormat,
         private canvasWidth:  number,
         private canvasHeight: number
     ) {
+        this.layerFormat = format;
         this.uniformBuffer = device.createBuffer({
             size:  UNIFORM_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
@@ -164,6 +203,7 @@ export class BrushRenderer {
         this.writeUniformBuffer();
         this.initProceduralGrain();
         this.buildAllBindGroups();
+        this.initGlazePipelines();
     }
 
     /** Generates a 256×256 white-noise grain texture as the default grain pattern,
@@ -321,16 +361,14 @@ export class BrushRenderer {
         }
 
         // ── Build library ────────────────────────────────────────────────────
-        this.grainLibrary = [
-            makeGrainTex(noise0),   // 0 soft noise
-            makeGrainTex(paper1),   // 1 canvas paper
-            makeGrainTex(paper2),   // 2 rough paper
-            makeGrainTex(cross3),   // 3 crosshatch
-            makeGrainTex(stipple4), // 4 stipple
-            makeGrainTex(water5),   // 5 watercolor
-            makeGrainTex(char6),    // 6 charcoal
-            makeGrainTex(linen7),   // 7 linen
-        ];
+        const pixArrays = [noise0, paper1, paper2, cross3, stipple4, water5, char6, linen7];
+        this.grainLibrary   = pixArrays.map(p => makeGrainTex(p));
+        this.grainPixelData = pixArrays.map(p => new Uint8Array(p));
+    }
+
+    /** Returns the CPU pixel data (256×256 RGBA) for a library grain texture. */
+    public getGrainPixelData(index: number): Uint8Array | null {
+        return this.grainPixelData[index] ?? null;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -440,6 +478,10 @@ export class BrushRenderer {
     public draw(stamps: Float32Array, targetTexture: GPUTexture): DirtyRect | null {
         if (stamps.length === 0) return null;
 
+        if (this.glazeMode !== 'off') {
+            return this.drawGlaze(stamps, targetTexture);
+        }
+
         const maxPerChunk    = Math.floor(this.ringBufferSize / BYTES_PER_STAMP);
         const floatsPerChunk = maxPerChunk * FLOATS_PER_STAMP;
 
@@ -450,10 +492,313 @@ export class BrushRenderer {
         return this.stampsToDirtyRect(stamps);
     }
 
+    public setGlazeMode(mode: GlazeMode): void {
+        this.glazeMode = mode;
+    }
+
+    public resetGlazeStroke(): void {
+        this.glazeStrokeActive = false;
+    }
+
     public updateResolution(w: number, h: number): void {
         this.canvasWidth  = w;
         this.canvasHeight = h;
         this.writeUniformBuffer();
+    }
+
+    // ── Private — Glaze ───────────────────────────────────────────────────────
+
+    private initGlazePipelines(): void {
+        const device = this.device;
+
+        this.glazeSampler = device.createSampler({
+            magFilter: 'linear', minFilter: 'linear',
+            addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge'
+        });
+
+        // ── Accumulation buffer (r16float) ────────────────────────────────
+        this.glazeBuffer = device.createTexture({
+            size:   [this.canvasWidth, this.canvasHeight],
+            format: 'r16float',
+            usage:  GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+        });
+        this.glazeBufferView = this.glazeBuffer.createView();
+
+        // ── Stroke base layer snapshot ────────────────────────────────────
+        this.strokeBaseLayer = device.createTexture({
+            size:   [this.canvasWidth, this.canvasHeight],
+            format: this.layerFormat,
+            usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+        });
+        this.strokeBaseView = this.strokeBaseLayer.createView();
+
+        // ── Uniform buffers ───────────────────────────────────────────────
+        // Accum: 16 bytes (resolution.xy, hardness, useTipTex)
+        this.glazeAccumUniforms = device.createBuffer({
+            size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        // Deposit: 32 bytes (resolution.xy, glazeMode u32, _pad, brushColor vec4)
+        this.glazeDepositUniforms = device.createBuffer({
+            size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+
+        // ── Bind group layouts ────────────────────────────────────────────
+        this.glazeAccumBGL = device.createBindGroupLayout({ entries: [
+            { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+              buffer:  { type: 'uniform' } },
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT,
+              texture: { sampleType: 'float' } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT,
+              sampler: { type: 'filtering' } },
+            { binding: 3, visibility: GPUShaderStage.FRAGMENT,
+              texture: { sampleType: 'float' } },
+            { binding: 4, visibility: GPUShaderStage.FRAGMENT,
+              sampler: { type: 'filtering' } },
+        ]});
+
+        this.glazeDepositBGL = device.createBindGroupLayout({ entries: [
+            { binding: 0, visibility: GPUShaderStage.FRAGMENT,
+              buffer:  { type: 'uniform' } },
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT,
+              texture: { sampleType: 'unfilterable-float' } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT,
+              sampler: { type: 'non-filtering' } },
+            { binding: 3, visibility: GPUShaderStage.FRAGMENT,
+              texture: { sampleType: 'float' } },
+            { binding: 4, visibility: GPUShaderStage.FRAGMENT,
+              sampler: { type: 'filtering' } },
+        ]});
+
+        // ── Vertex buffer layout (same as PipelineCache) ──────────────────
+        const vertexLayout: GPUVertexBufferLayout = {
+            arrayStride:   BYTES_PER_STAMP,
+            stepMode:      'instance',
+            attributes: [
+                { shaderLocation: 0, offset:  0, format: 'float32x2' },  // pos
+                { shaderLocation: 1, offset:  8, format: 'float32'   },  // pressure
+                { shaderLocation: 2, offset: 12, format: 'float32'   },  // size
+                { shaderLocation: 3, offset: 16, format: 'float32x4' },  // color
+                { shaderLocation: 4, offset: 32, format: 'float32x2' },  // tilt
+                { shaderLocation: 5, offset: 40, format: 'float32'   },  // opacity
+                { shaderLocation: 6, offset: 44, format: 'float32'   },  // stampAngle
+                { shaderLocation: 7, offset: 48, format: 'float32'   },  // roundness
+                { shaderLocation: 8, offset: 52, format: 'float32'   },  // grainDepthScl
+            ]
+        };
+
+        // ── Accumulation pipeline (r16float target, additive blend) ──────
+        const accumModule = device.createShaderModule({ code: glazeAccumSrc });
+        this.glazeAccumPipeline = device.createRenderPipeline({
+            layout: device.createPipelineLayout({ bindGroupLayouts: [this.glazeAccumBGL] }),
+            vertex: {
+                module:     accumModule,
+                entryPoint: 'vs_main',
+                buffers:    [vertexLayout]
+            },
+            fragment: {
+                module:     accumModule,
+                entryPoint: 'fs_main',
+                targets: [{
+                    format: 'r16float',
+                    blend: {
+                        color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+                        alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' }
+                    }
+                }]
+            },
+            primitive: { topology: 'triangle-strip' }
+        });
+
+        // ── Deposit pipeline (layerFormat target, overwrite) ──────────────
+        const depositModule = device.createShaderModule({ code: glazeDepositSrc });
+        this.glazeDepositPipeline = device.createRenderPipeline({
+            layout: device.createPipelineLayout({ bindGroupLayouts: [this.glazeDepositBGL] }),
+            vertex:   { module: depositModule, entryPoint: 'vs_main' },
+            fragment: {
+                module:     depositModule,
+                entryPoint: 'fs_main',
+                targets: [{
+                    format: this.layerFormat,
+                    blend: {
+                        color: { srcFactor: 'one', dstFactor: 'zero' },
+                        alpha: { srcFactor: 'one', dstFactor: 'zero' }
+                    }
+                }]
+            },
+            primitive: { topology: 'triangle-list' }
+        });
+    }
+
+    private beginGlazeStroke(layerTexture: GPUTexture): void {
+        if (!this.strokeBaseLayer || !this.glazeBufferView) return;
+
+        const enc = this.device.createCommandEncoder();
+
+        // Copy current layer to strokeBaseLayer (pre-stroke snapshot)
+        enc.copyTextureToTexture(
+            { texture: layerTexture },
+            { texture: this.strokeBaseLayer },
+            [this.canvasWidth, this.canvasHeight]
+        );
+
+        // Clear glazeBuffer to 0
+        const clearPass = enc.beginRenderPass({
+            colorAttachments: [{
+                view:       this.glazeBufferView,
+                loadOp:     'clear',
+                clearValue: { r: 0, g: 0, b: 0, a: 0 },
+                storeOp:    'store'
+            }]
+        });
+        clearPass.end();
+
+        this.device.queue.submit([enc.finish()]);
+        this.glazeStrokeActive = true;
+    }
+
+    private writeGlazeAccumUniforms(): void {
+        if (!this.glazeAccumUniforms) return;
+        const buf = new ArrayBuffer(16);
+        const f   = new Float32Array(buf);
+        const u   = new Uint32Array(buf);
+        f[0] = this.canvasWidth;
+        f[1] = this.canvasHeight;
+        f[2] = this.currentHardness;
+        u[3] = this.currentUseTipTex ? 1 : 0;
+        this.device.queue.writeBuffer(this.glazeAccumUniforms, 0, buf);
+    }
+
+    private writeGlazeDepositUniforms(r: number, g: number, b: number): void {
+        if (!this.glazeDepositUniforms) return;
+        const buf = new ArrayBuffer(32);
+        const f   = new Float32Array(buf);
+        const u32 = new Uint32Array(buf);
+        f[0]  = this.canvasWidth;
+        f[1]  = this.canvasHeight;
+        u32[2] = this.glazeModeToU32();
+        f[3]  = 0; // _pad
+        f[4]  = r;
+        f[5]  = g;
+        f[6]  = b;
+        f[7]  = 1.0;
+        this.device.queue.writeBuffer(this.glazeDepositUniforms, 0, buf);
+    }
+
+    private glazeModeToU32(): number {
+        switch (this.glazeMode) {
+            case 'light':   return 1;
+            case 'uniform': return 2;
+            case 'heavy':   return 3;
+            case 'intense': return 4;
+            default:        return 2; // 'off' fallback to uniform (unreachable when glazeMode==='off')
+        }
+    }
+
+    private drawGlaze(stamps: Float32Array, targetTexture: GPUTexture): DirtyRect | null {
+        if (!this.glazeStrokeActive) this.beginGlazeStroke(targetTexture);
+
+        const maxPerChunk    = Math.floor(this.ringBufferSize / BYTES_PER_STAMP);
+        const floatsPerChunk = maxPerChunk * FLOATS_PER_STAMP;
+        let fullDirty: DirtyRect | null = null;
+
+        for (let i = 0; i < stamps.length; i += floatsPerChunk) {
+            const chunk = stamps.slice(i, i + floatsPerChunk);
+            const chunkDirty = this.stampsToDirtyRect(chunk);
+            if (chunkDirty) {
+                this._drawGlazeChunk(chunk, targetTexture, chunkDirty);
+                fullDirty = mergeDirtyRects(fullDirty, chunkDirty);
+            }
+        }
+        return fullDirty;
+    }
+
+    private _drawGlazeChunk(stamps: Float32Array, targetTexture: GPUTexture, dirtyRect: DirtyRect): void {
+        if (!this.glazeAccumPipeline || !this.glazeDepositPipeline) return;
+        if (!this.glazeAccumBGL || !this.glazeDepositBGL) return;
+        if (!this.glazeBuffer || !this.glazeBufferView) return;
+        if (!this.strokeBaseLayer || !this.strokeBaseView) return;
+        if (!this.glazeAccumUniforms || !this.glazeDepositUniforms) return;
+        if (!this.glazeSampler) return;
+
+        // Read brush color from first stamp (stamps[4..6] = r,g,b)
+        const cr = stamps[4], cg = stamps[5], cb = stamps[6];
+
+        // Upload stamp data to ring buffer
+        const dataSize = stamps.byteLength;
+        let   start    = Math.ceil(this.currentOffset / 4) * 4;
+        if (start + dataSize > this.ringBufferSize) start = 0;
+        this.device.queue.writeBuffer(this.ringBuffer, start, stamps.buffer, stamps.byteOffset, dataSize);
+        this.currentOffset = start + dataSize;
+
+        // Update uniform buffers
+        this.writeGlazeAccumUniforms();
+        this.writeGlazeDepositUniforms(cr, cg, cb);
+
+        // Build bind groups (cheap — no heavy allocation)
+        const accumBG = this.device.createBindGroup({
+            layout: this.glazeAccumBGL,
+            entries: [
+                { binding: 0, resource: { buffer: this.glazeAccumUniforms } },
+                { binding: 1, resource: this.activeMaskView ?? this.dummyMaskView },
+                { binding: 2, resource: this.maskSampler },
+                { binding: 3, resource: this.activeTipView ?? this.dummyTipView },
+                { binding: 4, resource: this.tipSampler }
+            ]
+        });
+
+        // r16float sampler must be non-filtering
+        const glazeNFSampler = this.device.createSampler({
+            magFilter: 'nearest', minFilter: 'nearest',
+            addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge'
+        });
+
+        const depositBG = this.device.createBindGroup({
+            layout: this.glazeDepositBGL,
+            entries: [
+                { binding: 0, resource: { buffer: this.glazeDepositUniforms } },
+                { binding: 1, resource: this.glazeBufferView },
+                { binding: 2, resource: glazeNFSampler },
+                { binding: 3, resource: this.strokeBaseView },
+                { binding: 4, resource: this.glazeSampler }
+            ]
+        });
+
+        const encoder = this.device.createCommandEncoder();
+
+        // ── Pass A: accumulate stamps → glazeBuffer (additive) ────────────
+        const accumPass = encoder.beginRenderPass({
+            colorAttachments: [{
+                view:    this.glazeBufferView,
+                loadOp:  'load',
+                storeOp: 'store'
+            }]
+        });
+        accumPass.setPipeline(this.glazeAccumPipeline);
+        accumPass.setBindGroup(0, accumBG);
+        accumPass.setVertexBuffer(0, this.ringBuffer, start, dataSize);
+        accumPass.draw(4, stamps.length / FLOATS_PER_STAMP);
+        accumPass.end();
+
+        // ── Pass B: deposit glazeBuffer → targetTexture (overwrite) ──────
+        const depositView = targetTexture.createView();
+        const depositPass = encoder.beginRenderPass({
+            colorAttachments: [{
+                view:    depositView,
+                loadOp:  'load',
+                storeOp: 'store'
+            }]
+        });
+        depositPass.setPipeline(this.glazeDepositPipeline);
+        depositPass.setBindGroup(0, depositBG);
+        // Scissor to dirty rect so we only overwrite affected pixels
+        depositPass.setScissorRect(
+            dirtyRect.x, dirtyRect.y,
+            dirtyRect.width, dirtyRect.height
+        );
+        depositPass.draw(6);  // 2 triangles = fullscreen quad
+        depositPass.end();
+
+        this.device.queue.submit([encoder.finish()]);
     }
 
     // ── Private ───────────────────────────────────────────────────────────────

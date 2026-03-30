@@ -60,20 +60,8 @@ self.onmessage = (e: MessageEvent) => {
         }
 
         case 'flush_final': {
-            const safeStamps = engine.flush();
-            const tailStamps = engine.flushTail();
+            const finalStamps = engine.flush();
             engine.endStroke();
-            // Combine safe + taper-faded tail into one buffer
-            let finalStamps: Float32Array;
-            if (safeStamps.length === 0) {
-                finalStamps = tailStamps;
-            } else if (tailStamps.length === 0) {
-                finalStamps = safeStamps;
-            } else {
-                finalStamps = new Float32Array(safeStamps.length + tailStamps.length);
-                finalStamps.set(safeStamps, 0);
-                finalStamps.set(tailStamps, safeStamps.length);
-            }
             self.postMessage({ type: 'final', data: finalStamps }, [finalStamps.buffer]);
             break;
         }

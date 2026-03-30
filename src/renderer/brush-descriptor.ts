@@ -9,6 +9,7 @@
 
 export type BrushBlendMode = 'normal' | 'erase';
 export type GrainBlendMode = 'multiply' | 'screen' | 'overlay' | 'normal';
+export type GlazeMode = 'off' | 'light' | 'uniform' | 'heavy' | 'intense';
 
 // ── CurveSpec ─────────────────────────────────────────────────────────────────
 // JSON-serializable description of a 1D response curve mapping input [0..1]
@@ -95,8 +96,6 @@ export interface BrushDescriptor {
     tiltAngleInfluence:   number;
     /** Backward-compat: tiltAngle bool — enable full tilt-to-angle mapping */
     tiltAngle:            boolean;
-    /** Per-stamp angle randomness in degrees (0..180) */
-    angleJitter:          number;
 
     // ── Roundness dynamics ────────────────────────────────────────────────────
     /** Minimum per-stamp roundness (clamp floor, prevents complete collapse) */
@@ -107,28 +106,12 @@ export interface BrushDescriptor {
     roundnessPressureCurve: CurveSpec;
     /** Backward-compat: tilt squishes roundness proportionally */
     tiltShape:            boolean;
-
-    // ── Scatter ───────────────────────────────────────────────────────────────
-    /** X position scatter half-range (normalised canvas units) */
-    scatterX:             number;
-    /** Y position scatter half-range (normalised canvas units) */
-    scatterY:             number;
-    /** Curve: pressure → scatter multiplier */
-    scatterPressureCurve: CurveSpec;
-    /** Stamps emitted per spacing step (1..16) */
-    stampCount:           number;
-    /** Random ±N variation in stamp count (0 = exact) */
-    stampCountJitter:     number;
+    /** Master switch — when false all tilt inputs are ignored (size, shape, angle, cursor) */
+    tiltEnabled:          boolean;
 
     // ── Color ─────────────────────────────────────────────────────────────────
     /** Base (foreground) color [r, g, b, a] normalised 0..1 */
     color:                [number, number, number, number];
-    /** Secondary (background) color for fg/bg mix */
-    color2:               [number, number, number, number];
-    /** Mix slider: 0 = fg only, 1 = bg (color2) only */
-    colorFgBgMix:         number;
-    /** Curve: pressure → color mix multiplier */
-    colorMixPressureCurve: CurveSpec;
 
     // ── Color jitter — per tip ────────────────────────────────────────────────
     hueJitter:            number;   // 0..180 degrees
@@ -141,16 +124,6 @@ export interface BrushDescriptor {
     hueJitterPerStroke:   number;   // 0..180 degrees (applied once at stroke start)
     satJitterPerStroke:   number;   // 0..1
     valJitterPerStroke:   number;   // 0..1
-
-    // ── Tapering ──────────────────────────────────────────────────────────────
-    /** Start taper length in normalised canvas units (0 = off) */
-    taperStart:           number;
-    /** End taper length in normalised canvas units (0 = off) */
-    taperEnd:             number;
-    /** Apply taper to size as well */
-    taperSizeLink:        boolean;
-    /** Apply taper to opacity (almost always true when taper is set) */
-    taperOpacityLink:     boolean;
 
     // ── Stabilization ─────────────────────────────────────────────────────────
     /** Pull-string length (0 = off, >0 = string must be pulled past this distance) */
@@ -175,8 +148,6 @@ export interface BrushDescriptor {
     grainBrightness:      number;
     /** How grain texture blends with brush color */
     grainBlendMode:       GrainBlendMode;
-    /** Curve: pressure → per-stamp grain depth scale */
-    grainDepthCurve:      CurveSpec;
 
     // ── Wet mixing ────────────────────────────────────────────────────────────
     /** Dilution: 0 = opaque/dry, 1 = maximum wet blending */
@@ -191,21 +162,6 @@ export interface BrushDescriptor {
      *  average applied to each incoming pointer position before stamping. */
     smoothing:            number;
 
-    // ── Jitter seed ───────────────────────────────────────────────────────────
-    /** When true, the scatter/jitter PRNG uses a fixed seed every stroke,
-     *  producing the same scatter pattern each time you draw. */
-    jitterSeedLock:       boolean;
-    /** Seed value used when jitterSeedLock is true (0..999). */
-    jitterSeed:           number;
-
-    // ── Bristle tip ───────────────────────────────────────────────────────────
-    /** Number of bristle fibers (0 = off, 4..32 = bristle brush mode).
-     *  In bristle mode, each stamp position emits N micro-stamps in a cluster.
-     *  stampCount / scatter are ignored when bristleCount > 0. */
-    bristleCount:         number;
-    /** Cluster spread radius as a multiple of the stamp half-size (0.1..2.0) */
-    bristleLength:        number;
-
     // ── Wet edge ──────────────────────────────────────────────────────────────
     /** 0..1 strength of the wet-edge accumulation effect.
      *  Tracks per-stroke paint density and boosts opacity at stroke boundaries
@@ -214,6 +170,10 @@ export interface BrushDescriptor {
 
     // ── Blend mode ────────────────────────────────────────────────────────────
     blendMode:            BrushBlendMode;
+
+    // ── Accumulation / Glaze ─────────────────────────────────────────────────
+    /** Per-pixel accumulation model. 'off' = classic opacity blend. */
+    glazeMode:            GlazeMode;
 
     // ── Smudge ───────────────────────────────────────────────────────────────
     /** Pull: deposit blend weight (0=nothing deposited, 1=carry fully replaces layer) */
@@ -233,7 +193,7 @@ export interface BrushDescriptor {
 export function defaultBrushDescriptor(): BrushDescriptor {
     return {
         size:            0.05,
-        spacing:         0.1,
+        spacing:         0.01,
         hardness:        0.95,
         angle:           0,
         roundness:       1.0,
@@ -262,23 +222,14 @@ export function defaultBrushDescriptor(): BrushDescriptor {
         followStroke:         false,
         tiltAngleInfluence:   0,
         tiltAngle:            false,
-        angleJitter:          0,
 
         roundnessMin:         0.05,
         roundnessTiltCurve:   { ...CURVE_OFF },
         roundnessPressureCurve: { ...CURVE_OFF },
         tiltShape:            false,
-
-        scatterX:             0,
-        scatterY:             0,
-        scatterPressureCurve: { ...CURVE_OFF },
-        stampCount:           1,
-        stampCountJitter:     0,
+        tiltEnabled:          false,
 
         color:                [0, 0, 0, 1],
-        color2:               [1, 1, 1, 1],
-        colorFgBgMix:         0,
-        colorMixPressureCurve: { ...CURVE_OFF },
 
         hueJitter:            0,
         satJitter:            0,
@@ -289,11 +240,6 @@ export function defaultBrushDescriptor(): BrushDescriptor {
         hueJitterPerStroke:   0,
         satJitterPerStroke:   0,
         valJitterPerStroke:   0,
-
-        taperStart:           0,
-        taperEnd:             0,
-        taperSizeLink:        false,
-        taperOpacityLink:     true,
 
         pullStringLength:     0,
         catchUpEnabled:       false,
@@ -306,22 +252,17 @@ export function defaultBrushDescriptor(): BrushDescriptor {
         grainContrast:        1.0,
         grainBrightness:      0,
         grainBlendMode:       'multiply',
-        grainDepthCurve:      { ...CURVE_OFF },
 
         wetness:              0,
         paintLoad:            1,
         wetnessPressureCurve: { ...CURVE_OFF },
 
         smoothing:            0,
-        jitterSeedLock:       false,
-        jitterSeed:           42,
-
-        bristleCount:         0,
-        bristleLength:        0.8,
 
         wetEdge:              0,
 
         blendMode:            'normal',
+        glazeMode:            'off',
         smudge:          0,
         smudgeCharge:    0.8,
         smudgeDilution:  1.0,
@@ -343,8 +284,7 @@ export function defaultEraserDescriptor(): BrushDescriptor {
 export function cloneDescriptor(d: BrushDescriptor): BrushDescriptor {
     return {
         ...d,
-        color:  [...d.color]  as [number, number, number, number],
-        color2: [...d.color2] as [number, number, number, number],
+        color: [...d.color] as [number, number, number, number],
     };
 }
 

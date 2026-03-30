@@ -301,31 +301,25 @@ export class BrushPanel {
         set('bs-roundness', pct(d.roundness));          setTxt('bs-roundness-val', pct(d.roundness) + '%');
         set('bs-angle',     Math.round(d.angle));       setTxt('bs-angle-val',     Math.round(d.angle) + '°');
         tog('bs-follow-stroke', d.followStroke);
+        tog('bs-tilt-enabled', d.tiltEnabled ?? false);
 
         // Dynamics
         const flowPresStr = d.flowPressureCurve?.mode === 'off' ? 0 : Math.round((1 - (d.flowPressureCurve?.min ?? 0)) * 100);
         set('bs-pres-flow', flowPresStr); setTxt('bs-pres-flow-val', flowPresStr + '%');
 
-        // Scatter
-        set('bs-angle-jitter', Math.round(d.angleJitter));      setTxt('bs-angle-jitter-val', Math.round(d.angleJitter) + '°');
-        set('bs-scatter-x',    Math.round(d.scatterX * 1000));  setTxt('bs-scatter-x-val',    Math.round(d.scatterX * 1000) + '%');
-        set('bs-scatter-y',    Math.round(d.scatterY * 1000));  setTxt('bs-scatter-y-val',    Math.round(d.scatterY * 1000) + '%');
-        set('bs-stamp-count',  d.stampCount);                   setTxt('bs-stamp-count-val',  String(d.stampCount));
-
         // Color Dynamics
         set('bs-hue-jitter',    Math.round(d.hueJitter));       setTxt('bs-hue-jitter-val',    Math.round(d.hueJitter) + '°');
         set('bs-sat-jitter',    pct(d.satJitter));              setTxt('bs-sat-jitter-val',    pct(d.satJitter) + '%');
         set('bs-val-jitter',    pct(d.valJitter));              setTxt('bs-val-jitter-val',    pct(d.valJitter) + '%');
-        set('bs-fg-bg-mix',     pct(d.colorFgBgMix));          setTxt('bs-fg-bg-mix-val',     pct(d.colorFgBgMix) + '%');
         set('bs-hue-jitter-ps', Math.round(d.hueJitterPerStroke)); setTxt('bs-hue-jitter-ps-val', Math.round(d.hueJitterPerStroke) + '°');
         set('bs-sat-jitter-ps', pct(d.satJitterPerStroke));    setTxt('bs-sat-jitter-ps-val', pct(d.satJitterPerStroke) + '%');
         set('bs-val-jitter-ps', pct(d.valJitterPerStroke));    setTxt('bs-val-jitter-ps-val', pct(d.valJitterPerStroke) + '%');
 
-        // Tapering
-        set('bs-taper-start', Math.round(d.taperStart * 500)); setTxt('bs-taper-start-val', Math.round(d.taperStart * 500) + '%');
-        set('bs-taper-end',   Math.round(d.taperEnd   * 500)); setTxt('bs-taper-end-val',   Math.round(d.taperEnd   * 500) + '%');
-        tog('bs-taper-size', d.taperSizeLink);
-        tog('bs-taper-opac', d.taperOpacityLink);
+        // Glaze mode
+        const glazeModes = ['off', 'light', 'uniform', 'heavy', 'intense'];
+        const glazeIds   = ['bs-glaze-off', 'bs-glaze-light', 'bs-glaze-uniform', 'bs-glaze-heavy', 'bs-glaze-intense'];
+        const gm = d.glazeMode ?? 'off';
+        glazeIds.forEach((id, i) => document.getElementById(id)?.classList.toggle('active', glazeModes[i] === gm));
 
         // Stabilization
         set('bs-pull-string', Math.round(d.pullStringLength * 500)); setTxt('bs-pull-string-val', Math.round(d.pullStringLength * 500) + '%');
@@ -342,10 +336,6 @@ export class BrushPanel {
         set('bs-grain-contrast',   Math.round(d.grainContrast * 100));     setTxt('bs-grain-contrast-val',   d.grainContrast.toFixed(2));
         set('bs-grain-brightness', Math.round(d.grainBrightness * 100));   setTxt('bs-grain-brightness-val', d.grainBrightness.toFixed(2));
         tog('bs-grain-static', d.grainStatic);
-        const blendIdx = ({ multiply: 0, screen: 1, overlay: 2, normal: 3 } as Record<string, number>)[d.grainBlendMode] ?? 0;
-        ['bs-grain-multiply','bs-grain-screen','bs-grain-overlay','bs-grain-normal'].forEach(
-            (id, i) => document.getElementById(id)?.classList.toggle('active', i === blendIdx)
-        );
     }
 
     // ── Selection type section ────────────────────────────────────────────────

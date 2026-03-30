@@ -186,6 +186,18 @@ export class PaintApp {
         this.brushCursor.show();
     }
 
+    public setBrushTipBitmap(bmp: ImageBitmap | null): void {
+        this.brushCursor?.setTipBitmap(bmp);
+    }
+
+    public setBrushTiltActive(v: boolean): void {
+        this.brushCursor?.setTiltActive(v);
+    }
+
+    public setBrushSizePressureActive(v: boolean): void {
+        this.brushCursor?.setSizePressureActive(v);
+    }
+
     // ── Autosave ──────────────────────────────────────────────────────────────
 
     public connectAutosave(manager: AutosaveManager): void {

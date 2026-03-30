@@ -39,6 +39,12 @@ export class SmudgeRenderer {
     private dummyMaskTex:  GPUTexture;  // 1×1 white — "no selection active"
     private dummyMaskView: GPUTextureView;
 
+    private dummyTipTex:   GPUTexture;  // 1×1 white — "no tip texture"
+    private dummyTipView:  GPUTextureView;
+    private tipSampler:    GPUSampler;
+    private activeTipView: GPUTextureView | null = null;
+    private useTipTex:     boolean = false;
+
     private width:  number;
     private height: number;
 
@@ -81,6 +87,21 @@ export class SmudgeRenderer {
             { bytesPerRow: 256 }, [1, 1]
         );
         this.dummyMaskView = this.dummyMaskTex.createView();
+
+        this.dummyTipTex = device.createTexture({
+            size: [1, 1], format: 'rgba8unorm',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        });
+        device.queue.writeTexture(
+            { texture: this.dummyTipTex },
+            new Uint8Array([255, 255, 255, 255]),
+            { bytesPerRow: 4 }, [1, 1]
+        );
+        this.dummyTipView = this.dummyTipTex.createView();
+        this.tipSampler   = device.createSampler({
+            magFilter: 'linear', minFilter: 'linear',
+            addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge',
+        });
 
         this.carryTexture   = this.makeCanvasTex();
         this.scratchTexture = this.makeCanvasTex();
@@ -149,11 +170,14 @@ export class SmudgeRenderer {
         if (!stamps.length) return null;
 
         const [r, g, b, a] = userColor;
-        this.device.queue.writeBuffer(
-            this.uniformBuffer, 0,
-            new Float32Array([this.width, this.height, hardness, charge, pull, dilution, 0, 0,
-                              r, g, b, a]) // user_color at offset 32 (non-premultiplied sRGB)
-        );
+        const ubuf = new ArrayBuffer(48);
+        const uf   = new Float32Array(ubuf);
+        const uu   = new Uint32Array(ubuf);
+        uf[0] = this.width; uf[1] = this.height;
+        uf[2] = hardness;   uf[3] = charge; uf[4] = pull; uf[5] = dilution;
+        uf[6] = 0;          uu[7] = this.useTipTex ? 1 : 0;
+        uf[8] = r; uf[9] = g; uf[10] = b; uf[11] = a;
+        this.device.queue.writeBuffer(this.uniformBuffer, 0, ubuf);
 
         // Upload all stamp data to ring buffer in one shot.
         const dataSize = stamps.byteLength;
@@ -244,6 +268,11 @@ export class SmudgeRenderer {
         this.scratchTexture = this.makeCanvasTex();
     }
 
+    public setTipTexture(texture: GPUTexture | null): void {
+        this.activeTipView = texture ? texture.createView() : null;
+        this.useTipTex     = texture !== null;
+    }
+
     public destroy(): void {
         this.carryTexture.destroy();
         this.scratchTexture.destroy();
@@ -255,6 +284,7 @@ export class SmudgeRenderer {
     // ── Private ───────────────────────────────────────────────────────────────
 
     private _makeBG(texA: GPUTextureView, texB: GPUTextureView): GPUBindGroup {
+        const tipView = this.activeTipView ?? this.dummyTipView;
         return this.device.createBindGroup({
             layout: this.bindGroupLayout,
             entries: [
@@ -263,6 +293,8 @@ export class SmudgeRenderer {
                 { binding: 2, resource: texB                           },
                 { binding: 3, resource: this.texSampler                },
                 { binding: 4, resource: this.maskSampler               },
+                { binding: 5, resource: tipView                        },
+                { binding: 6, resource: this.tipSampler                },
             ],
         });
     }
@@ -287,6 +319,8 @@ export class SmudgeRenderer {
                 { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '2d' } },
                 { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering'     } },
                 { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'non-filtering' } },
+                { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '2d' } },
+                { binding: 6, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering'     } },
             ],
         });
     }

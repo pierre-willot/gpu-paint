@@ -15,7 +15,6 @@ import { PressureCurveUI }      from './ui/panels/pressure-curve-ui';
 import { CanvasSizeDialog }      from './ui/panels/canvas-size-dialog';
 import { BrushPresets }         from './core/brush-presets';
 import { BrushPanel, drawPreview } from './ui/panels/brush-panel';
-import { CurveEditor }          from './ui/panels/curve-editor';
 import './style.css';
 
 const CANVAS_LOGICAL = { width: 1000, height: 1400 };
@@ -428,313 +427,274 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         });
     };
 
-    // ── Pressure curve editors ────────────────────────────────────────────────
-
-    let sizeCurveEditor:             CurveEditor | null = null;
-    let sizeTiltCurveEditor:         CurveEditor | null = null;
-    let sizeSpeedCurveEditor:        CurveEditor | null = null;
-    let opacityCurveEditor:          CurveEditor | null = null;
-    let opacitySpeedCurveEditor:     CurveEditor | null = null;
-    let flowCurveEditor:             CurveEditor | null = null;
-    let roundnessTiltCurveEditor:    CurveEditor | null = null;
-    let roundnessPressureCurveEditor: CurveEditor | null = null;
-    let scatterPressureCurveEditor:  CurveEditor | null = null;
-    let grainDepthCurveEditor:       CurveEditor | null = null;
-    let colorMixCurveEditor:         CurveEditor | null = null;
-
-    const sizeCurveContainer              = document.getElementById('bs-size-curve-container');
-    const sizeTiltCurveContainer          = document.getElementById('bs-size-tilt-curve-container');
-    const sizeSpeedCurveContainer         = document.getElementById('bs-size-speed-curve-container');
-    const opacityCurveContainer           = document.getElementById('bs-opacity-curve-container');
-    const opacitySpeedCurveContainer      = document.getElementById('bs-opacity-speed-curve-container');
-    const flowCurveContainer              = document.getElementById('bs-flow-curve-container');
-    const roundnessTiltCurveContainer     = document.getElementById('bs-roundness-tilt-curve-container');
-    const roundnessPressureCurveContainer = document.getElementById('bs-roundness-pressure-curve-container');
-    const scatterPressureCurveContainer   = document.getElementById('bs-scatter-pressure-curve-container');
-    const grainDepthCurveContainer        = document.getElementById('bs-grain-depth-curve-container');
-    const colorMixCurveContainer          = document.getElementById('bs-color-mix-curve-container');
-
-    const makeEditor = (label: string, onChange: (s: any) => void) =>
-        new CurveEditor({ width: 120, height: 70, label, onChange });
-
-    if (sizeCurveContainer) {
-        sizeCurveEditor = makeEditor('Pressure → Size', (spec) => { app.brushTool.getDescriptor().sizePressureCurve = spec; pushBrush(); });
-        sizeCurveContainer.appendChild(sizeCurveEditor.el);
-    }
-    if (sizeTiltCurveContainer) {
-        sizeTiltCurveEditor = makeEditor('Tilt → Size', (spec) => { app.brushTool.getDescriptor().sizeTiltCurve = spec; pushBrush(); });
-        sizeTiltCurveContainer.appendChild(sizeTiltCurveEditor.el);
-    }
-    if (sizeSpeedCurveContainer) {
-        sizeSpeedCurveEditor = makeEditor('Speed → Size', (spec) => { app.brushTool.getDescriptor().sizeSpeedCurve = spec; pushBrush(); });
-        sizeSpeedCurveContainer.appendChild(sizeSpeedCurveEditor.el);
-    }
-    if (opacityCurveContainer) {
-        opacityCurveEditor = makeEditor('Pressure → Opacity', (spec) => { app.brushTool.getDescriptor().opacityPressureCurve = spec; pushBrush(); });
-        opacityCurveContainer.appendChild(opacityCurveEditor.el);
-    }
-    if (opacitySpeedCurveContainer) {
-        opacitySpeedCurveEditor = makeEditor('Speed → Opacity', (spec) => { app.brushTool.getDescriptor().opacitySpeedCurve = spec; pushBrush(); });
-        opacitySpeedCurveContainer.appendChild(opacitySpeedCurveEditor.el);
-    }
-    if (flowCurveContainer) {
-        flowCurveEditor = makeEditor('Pressure → Flow', (spec) => { app.brushTool.getDescriptor().flowPressureCurve = spec; pushBrush(); });
-        flowCurveContainer.appendChild(flowCurveEditor.el);
-    }
-    if (roundnessTiltCurveContainer) {
-        roundnessTiltCurveEditor = makeEditor('Tilt → Roundness', (spec) => { app.brushTool.getDescriptor().roundnessTiltCurve = spec; pushBrush(); });
-        roundnessTiltCurveContainer.appendChild(roundnessTiltCurveEditor.el);
-    }
-    if (roundnessPressureCurveContainer) {
-        roundnessPressureCurveEditor = makeEditor('Pressure → Roundness', (spec) => { app.brushTool.getDescriptor().roundnessPressureCurve = spec; pushBrush(); });
-        roundnessPressureCurveContainer.appendChild(roundnessPressureCurveEditor.el);
-    }
-    if (scatterPressureCurveContainer) {
-        scatterPressureCurveEditor = makeEditor('Pressure → Scatter', (spec) => { app.brushTool.getDescriptor().scatterPressureCurve = spec; pushBrush(); });
-        scatterPressureCurveContainer.appendChild(scatterPressureCurveEditor.el);
-    }
-    if (grainDepthCurveContainer) {
-        grainDepthCurveEditor = makeEditor('Pressure → Grain', (spec) => { app.brushTool.getDescriptor().grainDepthCurve = spec; pushBrush(); });
-        grainDepthCurveContainer.appendChild(grainDepthCurveEditor.el);
-    }
-    if (colorMixCurveContainer) {
-        colorMixCurveEditor = makeEditor('Pressure → Color Mix', (spec) => { app.brushTool.getDescriptor().colorMixPressureCurve = spec; pushBrush(); });
-        colorMixCurveContainer.appendChild(colorMixCurveEditor.el);
-    }
-
-    // ── Dynamics rows (Size / Opacity / Flow) ────────────────────────────────
+    // ── Dynamics popup ────────────────────────────────────────────────────────
     {
-        const popup  = document.getElementById('bs-dyn-popup')!;
-        const title  = document.getElementById('bs-dyn-popup-title')!;
-        const closeX = document.getElementById('bs-dyn-popup-close')!;
+        const popup    = document.getElementById('dyn-popup')!;
+        const titleEl  = document.getElementById('dyn-popup-title')!;
+        const closeBtn = document.getElementById('dyn-popup-close')!;
+        const noteEl   = document.getElementById('dyn-popup-note') as HTMLElement;
 
-        function showDynPopup(groupId: string, hd: string, near: HTMLElement): void {
-            popup.querySelectorAll<HTMLElement>('.bs-dpop-grp').forEach(g => { g.style.display = 'none'; });
-            const g = document.getElementById(groupId);
-            if (g) g.style.display = '';
-            title.textContent = hd;
-            popup.style.display = '';
-            const r   = near.getBoundingClientRect();
-            const pw  = popup.offsetWidth || 210;
+        const SOURCE_KEYS = ['pressure', 'tilt', 'velocity', 'random'] as const;
+        type SourceKey = typeof SOURCE_KEYS[number];
+
+        interface SourceConfig {
+            getEnabled(): boolean;
+            setEnabled(on: boolean): void;
+            getMin(): number;
+            setMin(v: number): void;
+            getMax(): number;
+            setMax(v: number): void;
+        }
+        interface ParamConfig { title: string; sources: Partial<Record<SourceKey, SourceConfig>>; }
+
+        function getCurveEnabled(spec: { mode: string }): boolean { return spec.mode !== 'off'; }
+        function setCurveMode(spec: { mode: string; min: number; max: number; [k: string]: unknown }, on: boolean) {
+            return { ...spec, mode: on ? 'linear' : 'off' };
+        }
+
+        const PARAM_CONFIGS: Record<string, ParamConfig> = {
+            size: {
+                title: 'Size',
+                sources: {
+                    pressure: {
+                        getEnabled: () => getCurveEnabled(app.brushTool.getDescriptor().sizePressureCurve),
+                        setEnabled: (on) => { const d = app.brushTool.getDescriptor(); d.sizePressureCurve = setCurveMode(d.sizePressureCurve, on) as typeof d.sizePressureCurve; pushBrush(); },
+                        getMin: () => app.brushTool.getDescriptor().sizePressureCurve.min,
+                        setMin: (v) => { const d = app.brushTool.getDescriptor(); d.sizePressureCurve = { ...d.sizePressureCurve, min: v }; pushBrush(); },
+                        getMax: () => app.brushTool.getDescriptor().sizePressureCurve.max,
+                        setMax: (v) => { const d = app.brushTool.getDescriptor(); d.sizePressureCurve = { ...d.sizePressureCurve, max: v }; pushBrush(); },
+                    },
+                    tilt: {
+                        getEnabled: () => getCurveEnabled(app.brushTool.getDescriptor().sizeTiltCurve),
+                        setEnabled: (on) => { const d = app.brushTool.getDescriptor(); d.sizeTiltCurve = setCurveMode(d.sizeTiltCurve, on) as typeof d.sizeTiltCurve; pushBrush(); },
+                        getMin: () => app.brushTool.getDescriptor().sizeTiltCurve.min,
+                        setMin: (v) => { const d = app.brushTool.getDescriptor(); d.sizeTiltCurve = { ...d.sizeTiltCurve, min: v }; pushBrush(); },
+                        getMax: () => app.brushTool.getDescriptor().sizeTiltCurve.max,
+                        setMax: (v) => { const d = app.brushTool.getDescriptor(); d.sizeTiltCurve = { ...d.sizeTiltCurve, max: v }; pushBrush(); },
+                    },
+                    velocity: {
+                        getEnabled: () => getCurveEnabled(app.brushTool.getDescriptor().sizeSpeedCurve),
+                        setEnabled: (on) => { const d = app.brushTool.getDescriptor(); d.sizeSpeedCurve = setCurveMode(d.sizeSpeedCurve, on) as typeof d.sizeSpeedCurve; pushBrush(); },
+                        getMin: () => app.brushTool.getDescriptor().sizeSpeedCurve.min,
+                        setMin: (v) => { const d = app.brushTool.getDescriptor(); d.sizeSpeedCurve = { ...d.sizeSpeedCurve, min: v }; pushBrush(); },
+                        getMax: () => app.brushTool.getDescriptor().sizeSpeedCurve.max,
+                        setMax: (v) => { const d = app.brushTool.getDescriptor(); d.sizeSpeedCurve = { ...d.sizeSpeedCurve, max: v }; pushBrush(); },
+                    },
+                    random: {
+                        getEnabled: () => app.brushTool.getDescriptor().sizeJitter > 0,
+                        setEnabled: (on) => { const d = app.brushTool.getDescriptor(); if (!on) { d.sizeJitter = 0; } else if (d.sizeJitter === 0) { d.sizeJitter = 0.5; } pushBrush(); },
+                        getMin: () => 0,
+                        setMin: (_) => {},
+                        getMax: () => app.brushTool.getDescriptor().sizeJitter,
+                        setMax: (v) => { app.brushTool.getDescriptor().sizeJitter = v; pushBrush(); },
+                    },
+                },
+            },
+            opacity: {
+                title: 'Opacity',
+                sources: {
+                    pressure: {
+                        getEnabled: () => getCurveEnabled(app.brushTool.getDescriptor().opacityPressureCurve),
+                        setEnabled: (on) => { const d = app.brushTool.getDescriptor(); d.opacityPressureCurve = setCurveMode(d.opacityPressureCurve, on) as typeof d.opacityPressureCurve; pushBrush(); },
+                        getMin: () => app.brushTool.getDescriptor().opacityPressureCurve.min,
+                        setMin: (v) => { const d = app.brushTool.getDescriptor(); d.opacityPressureCurve = { ...d.opacityPressureCurve, min: v }; pushBrush(); },
+                        getMax: () => app.brushTool.getDescriptor().opacityPressureCurve.max,
+                        setMax: (v) => { const d = app.brushTool.getDescriptor(); d.opacityPressureCurve = { ...d.opacityPressureCurve, max: v }; pushBrush(); },
+                    },
+                    velocity: {
+                        getEnabled: () => getCurveEnabled(app.brushTool.getDescriptor().opacitySpeedCurve),
+                        setEnabled: (on) => { const d = app.brushTool.getDescriptor(); d.opacitySpeedCurve = setCurveMode(d.opacitySpeedCurve, on) as typeof d.opacitySpeedCurve; pushBrush(); },
+                        getMin: () => app.brushTool.getDescriptor().opacitySpeedCurve.min,
+                        setMin: (v) => { const d = app.brushTool.getDescriptor(); d.opacitySpeedCurve = { ...d.opacitySpeedCurve, min: v }; pushBrush(); },
+                        getMax: () => app.brushTool.getDescriptor().opacitySpeedCurve.max,
+                        setMax: (v) => { const d = app.brushTool.getDescriptor(); d.opacitySpeedCurve = { ...d.opacitySpeedCurve, max: v }; pushBrush(); },
+                    },
+                    random: {
+                        getEnabled: () => app.brushTool.getDescriptor().opacityJitter > 0,
+                        setEnabled: (on) => { const d = app.brushTool.getDescriptor(); if (!on) { d.opacityJitter = 0; } else if (d.opacityJitter === 0) { d.opacityJitter = 0.5; } pushBrush(); },
+                        getMin: () => 0,
+                        setMin: (_) => {},
+                        getMax: () => app.brushTool.getDescriptor().opacityJitter,
+                        setMax: (v) => { app.brushTool.getDescriptor().opacityJitter = v; pushBrush(); },
+                    },
+                },
+            },
+            flow: {
+                title: 'Flow',
+                sources: {
+                    pressure: {
+                        getEnabled: () => getCurveEnabled(app.brushTool.getDescriptor().flowPressureCurve),
+                        setEnabled: (on) => { const d = app.brushTool.getDescriptor(); d.flowPressureCurve = setCurveMode(d.flowPressureCurve, on) as typeof d.flowPressureCurve; pushBrush(); },
+                        getMin: () => app.brushTool.getDescriptor().flowPressureCurve.min,
+                        setMin: (v) => { const d = app.brushTool.getDescriptor(); d.flowPressureCurve = { ...d.flowPressureCurve, min: v }; pushBrush(); },
+                        getMax: () => app.brushTool.getDescriptor().flowPressureCurve.max,
+                        setMax: (v) => { const d = app.brushTool.getDescriptor(); d.flowPressureCurve = { ...d.flowPressureCurve, max: v }; pushBrush(); },
+                    },
+                },
+            },
+            roundness: {
+                title: 'Roundness',
+                sources: {
+                    pressure: {
+                        getEnabled: () => getCurveEnabled(app.brushTool.getDescriptor().roundnessPressureCurve),
+                        setEnabled: (on) => { const d = app.brushTool.getDescriptor(); d.roundnessPressureCurve = setCurveMode(d.roundnessPressureCurve, on) as typeof d.roundnessPressureCurve; pushBrush(); },
+                        getMin: () => app.brushTool.getDescriptor().roundnessPressureCurve.min,
+                        setMin: (v) => { const d = app.brushTool.getDescriptor(); d.roundnessPressureCurve = { ...d.roundnessPressureCurve, min: v }; pushBrush(); },
+                        getMax: () => app.brushTool.getDescriptor().roundnessPressureCurve.max,
+                        setMax: (v) => { const d = app.brushTool.getDescriptor(); d.roundnessPressureCurve = { ...d.roundnessPressureCurve, max: v }; pushBrush(); },
+                    },
+                    tilt: {
+                        getEnabled: () => getCurveEnabled(app.brushTool.getDescriptor().roundnessTiltCurve),
+                        setEnabled: (on) => { const d = app.brushTool.getDescriptor(); d.roundnessTiltCurve = setCurveMode(d.roundnessTiltCurve, on) as typeof d.roundnessTiltCurve; pushBrush(); },
+                        getMin: () => app.brushTool.getDescriptor().roundnessTiltCurve.min,
+                        setMin: (v) => { const d = app.brushTool.getDescriptor(); d.roundnessTiltCurve = { ...d.roundnessTiltCurve, min: v }; pushBrush(); },
+                        getMax: () => app.brushTool.getDescriptor().roundnessTiltCurve.max,
+                        setMax: (v) => { const d = app.brushTool.getDescriptor(); d.roundnessTiltCurve = { ...d.roundnessTiltCurve, max: v }; pushBrush(); },
+                    },
+                },
+            },
+        };
+
+        function updateFill(src: SourceKey): void {
+            const lo   = document.getElementById(`dyn-${src}-lo`)   as HTMLInputElement | null;
+            const hi   = document.getElementById(`dyn-${src}-hi`)   as HTMLInputElement | null;
+            const fill = document.querySelector(`#dyn-row-${src} .dual-fill`) as HTMLElement | null;
+            if (!lo || !hi || !fill) return;
+            const lv = parseInt(lo.value), hv = parseInt(hi.value);
+            fill.style.left  = lv + '%';
+            fill.style.width = Math.max(0, hv - lv) + '%';
+            lo.style.zIndex  = lv > 90 ? '3' : '1';
+        }
+
+        function loadParam(key: string | null): void {
+            const cfg = key ? PARAM_CONFIGS[key] : null;
+            noteEl.style.display = cfg ? 'none' : '';
+            for (const src of SOURCE_KEYS) {
+                const row    = document.getElementById(`dyn-row-${src}`);
+                const srcCfg = cfg?.sources[src];
+                if (!row) continue;
+                row.style.display = (cfg && srcCfg) ? '' : 'none';
+                if (!srcCfg) continue;
+                const chk   = document.getElementById(`dyn-${src}-chk`)  as HTMLInputElement | null;
+                const minEl = document.getElementById(`dyn-${src}-min`)   as HTMLInputElement | null;
+                const lo    = document.getElementById(`dyn-${src}-lo`)    as HTMLInputElement | null;
+                const hi    = document.getElementById(`dyn-${src}-hi`)    as HTMLInputElement | null;
+                const maxEl = document.getElementById(`dyn-${src}-max`)   as HTMLInputElement | null;
+                if (chk)   chk.checked  = srcCfg.getEnabled();
+                const minV = Math.round(srcCfg.getMin() * 100);
+                const maxV = Math.round(srcCfg.getMax() * 100);
+                if (lo)    lo.value     = String(minV);
+                if (hi)    hi.value     = String(maxV);
+                if (minEl) minEl.value  = minV + '%';
+                if (maxEl) maxEl.value  = maxV + '%';
+                updateFill(src);
+            }
+        }
+
+        let openDynBtn: HTMLElement | null = null;
+        let openParamKey: string | null    = null;
+
+        function closeDynPopup(): void {
+            popup.classList.remove('open');
+            if (openDynBtn) openDynBtn.classList.remove('active');
+            openDynBtn   = null;
+            openParamKey = null;
+        }
+
+        function openDynPopup(key: string | null, btn: HTMLElement): void {
+            if (openDynBtn === btn && popup.classList.contains('open')) { closeDynPopup(); return; }
+            if (openDynBtn) openDynBtn.classList.remove('active');
+            openDynBtn   = btn;
+            openParamKey = key;
+            const cfg    = key ? PARAM_CONFIGS[key] : null;
+            titleEl.textContent = (cfg?.title ?? 'Dynamics') + ' — Dynamics';
+            loadParam(key);
+            popup.classList.add('open');
+            btn.classList.add('active');
+            const r  = btn.getBoundingClientRect();
+            const pw = popup.offsetWidth  || 330;
+            const ph = popup.offsetHeight || 200;
             let   lft = r.right + 6;
             if (lft + pw > window.innerWidth - 4) lft = r.left - pw - 6;
             popup.style.left = Math.max(4, lft) + 'px';
-            popup.style.top  = Math.max(4, Math.min(r.top, window.innerHeight - 280)) + 'px';
+            popup.style.top  = Math.max(4, Math.min(r.top, window.innerHeight - ph - 4)) + 'px';
         }
 
-        closeX.addEventListener('click', () => { popup.style.display = 'none'; });
-        document.addEventListener('mousedown', e => {
-            if (popup.style.display === 'none') return;
+        // Per-source event wiring
+        for (const src of SOURCE_KEYS) {
+            const chk   = document.getElementById(`dyn-${src}-chk`)  as HTMLInputElement | null;
+            const minEl = document.getElementById(`dyn-${src}-min`)   as HTMLInputElement | null;
+            const lo    = document.getElementById(`dyn-${src}-lo`)    as HTMLInputElement | null;
+            const hi    = document.getElementById(`dyn-${src}-hi`)    as HTMLInputElement | null;
+            const maxEl = document.getElementById(`dyn-${src}-max`)   as HTMLInputElement | null;
+
+            chk?.addEventListener('change', () => {
+                if (!openParamKey) return;
+                const s = PARAM_CONFIGS[openParamKey]?.sources[src];
+                if (!s) return;
+                s.setEnabled(chk!.checked);
+                loadParam(openParamKey);
+            });
+            lo?.addEventListener('input', () => {
+                if (!openParamKey) return;
+                const s = PARAM_CONFIGS[openParamKey]?.sources[src];
+                if (!s) return;
+                let lv = parseInt(lo!.value), hv = parseInt(hi?.value ?? '100');
+                if (lv > hv) { lv = hv; lo!.value = String(lv); }
+                if (minEl) minEl.value = lv + '%';
+                s.setMin(lv / 100);
+                updateFill(src);
+            });
+            hi?.addEventListener('input', () => {
+                if (!openParamKey) return;
+                const s = PARAM_CONFIGS[openParamKey]?.sources[src];
+                if (!s) return;
+                let hv = parseInt(hi!.value), lv = parseInt(lo?.value ?? '0');
+                if (hv < lv) { hv = lv; hi!.value = String(hv); }
+                if (maxEl) maxEl.value = hv + '%';
+                s.setMax(hv / 100);
+                updateFill(src);
+            });
+            minEl?.addEventListener('change', () => {
+                if (!openParamKey) return;
+                const s = PARAM_CONFIGS[openParamKey]?.sources[src];
+                if (!s) return;
+                const v = Math.max(0, Math.min(100, parseInt(minEl!.value) || 0));
+                minEl!.value = v + '%';
+                if (lo) lo.value = String(v);
+                s.setMin(v / 100);
+                updateFill(src);
+            });
+            maxEl?.addEventListener('change', () => {
+                if (!openParamKey) return;
+                const s = PARAM_CONFIGS[openParamKey]?.sources[src];
+                if (!s) return;
+                const v = Math.max(0, Math.min(100, parseInt(maxEl!.value) || 0));
+                maxEl!.value = v + '%';
+                if (hi) hi.value = String(v);
+                s.setMax(v / 100);
+                updateFill(src);
+            });
+        }
+
+        closeBtn.addEventListener('click', closeDynPopup);
+        document.addEventListener('mousedown', (e) => {
+            if (!popup.classList.contains('open')) return;
             const t = e.target as Element;
-            if (!popup.contains(t) && !t.classList.contains('bs-curve-icon')) {
-                popup.style.display = 'none';
-            }
+            if (!popup.contains(t) && !t.closest?.('.curve-btn')) closeDynPopup();
         });
 
-        function activateCurve(spec: { mode: string; p1x?: number; p1y?: number; p2x?: number; p2y?: number; min: number; max: number }): typeof spec {
-            if (spec.mode !== 'off') return { ...spec };
-            return { mode: 'bezier', p1x: spec.p1x ?? 0.42, p1y: spec.p1y ?? 0.0, p2x: spec.p2x ?? 0.58, p2y: spec.p2y ?? 1.0, min: spec.min, max: spec.max };
-        }
-
-        // ── SIZE row ──────────────────────────────────────────────────────────
-        const sizeSl  = document.getElementById('bs-dyn-size-sl')  as HTMLInputElement;
-        const sizeVl  = document.getElementById('bs-dyn-size-vl')  as HTMLInputElement;
-        const sizeSel = document.getElementById('bs-dyn-size-sel') as HTMLSelectElement;
-        const sizeBtn = document.getElementById('bs-dyn-size-btn') as HTMLButtonElement;
-
-        const SIZE_GROUPS: Record<string, [string, string]> = {
-            pressure: ['bs-dpop-size-pressure', 'Size · Pressure'],
-            velocity: ['bs-dpop-size-velocity', 'Size · Velocity'],
-            tilt:     ['bs-dpop-size-tilt',     'Size · Tilt'],
-            random:   ['bs-dpop-size-random',   'Size · Random'],
+        // Wired param keys
+        const BTN_MAP: Record<string, string> = {
+            'bs-opacity-dyn-btn':   'opacity',
+            'bs-flow-dyn-btn':      'flow',
+            'bs-size-dyn-btn':      'size',
+            'bs-roundness-dyn-btn': 'roundness',
         };
 
-        function syncSizeSlider(): void {
-            const d = app.brushTool.getDescriptor();
-            const m = sizeSel?.value ?? 'none';
-            let v = 0;
-            if (m === 'pressure') v = d.sizePressureCurve.max;
-            else if (m === 'velocity') v = d.sizeSpeedCurve.max;
-            else if (m === 'tilt')     v = d.sizeTiltCurve.max;
-            else if (m === 'random')   v = d.sizeJitter;
-            if (sizeSl) { sizeSl.value = String(Math.round(v * 100)); }
-            if (sizeVl) sizeVl.value = Math.round(v * 100) + '%';
-        }
-
-        sizeSel?.addEventListener('change', () => {
-            const mode = sizeSel.value;
-            const d = app.brushTool.getDescriptor();
-            d.pressureSize = 0;
-            if (mode !== 'pressure') d.sizePressureCurve = { ...d.sizePressureCurve, mode: 'off' };
-            if (mode !== 'velocity') d.sizeSpeedCurve    = { ...d.sizeSpeedCurve,    mode: 'off' };
-            if (mode !== 'tilt')     d.sizeTiltCurve     = { ...d.sizeTiltCurve,     mode: 'off' };
-            if (mode !== 'random')   d.sizeJitter        = 0;
-            if (mode === 'pressure') d.sizePressureCurve = activateCurve(d.sizePressureCurve) as typeof d.sizePressureCurve;
-            else if (mode === 'velocity') d.sizeSpeedCurve = activateCurve(d.sizeSpeedCurve) as typeof d.sizeSpeedCurve;
-            else if (mode === 'tilt')     d.sizeTiltCurve  = activateCurve(d.sizeTiltCurve)  as typeof d.sizeTiltCurve;
-            sizeCurveEditor?.setSpec(d.sizePressureCurve);
-            sizeSpeedCurveEditor?.setSpec(d.sizeSpeedCurve);
-            sizeTiltCurveEditor?.setSpec(d.sizeTiltCurve);
-            sizeBtn?.classList.toggle('grayed', mode === 'none');
-            syncSizeSlider();
-            pushBrush();
+        document.querySelectorAll<HTMLButtonElement>('.curve-btn').forEach(btn => {
+            btn.addEventListener('click', () => openDynPopup(BTN_MAP[btn.id] ?? null, btn));
         });
-
-        sizeSl?.addEventListener('input', () => {
-            const pct  = parseInt(sizeSl.value) / 100;
-            if (sizeVl) sizeVl.value = Math.round(pct * 100) + '%';
-            const mode = sizeSel?.value ?? 'none';
-            const d    = app.brushTool.getDescriptor();
-            if (mode === 'pressure') { d.sizePressureCurve = { ...d.sizePressureCurve, max: pct }; sizeCurveEditor?.setSpec(d.sizePressureCurve); }
-            else if (mode === 'velocity') { d.sizeSpeedCurve = { ...d.sizeSpeedCurve, max: pct }; sizeSpeedCurveEditor?.setSpec(d.sizeSpeedCurve); }
-            else if (mode === 'tilt')     { d.sizeTiltCurve  = { ...d.sizeTiltCurve,  max: pct }; sizeTiltCurveEditor?.setSpec(d.sizeTiltCurve); }
-            else if (mode === 'random')   { d.sizeJitter = pct; }
-            pushBrush();
-        });
-
-        sizeBtn?.addEventListener('click', () => {
-            const mode = sizeSel?.value ?? 'none';
-            if (mode === 'none') return;
-            const [grpId, hd] = SIZE_GROUPS[mode];
-            showDynPopup(grpId, hd, sizeBtn);
-        });
-
-        // ── OPACITY row ───────────────────────────────────────────────────────
-        const opacSl  = document.getElementById('bs-dyn-opac-sl')  as HTMLInputElement;
-        const opacVl  = document.getElementById('bs-dyn-opac-vl')  as HTMLInputElement;
-        const opacSel = document.getElementById('bs-dyn-opac-sel') as HTMLSelectElement;
-        const opacBtn = document.getElementById('bs-dyn-opac-btn') as HTMLButtonElement;
-
-        const OPAC_GROUPS: Record<string, [string, string]> = {
-            pressure: ['bs-dpop-opac-pressure', 'Opacity · Pressure'],
-            velocity: ['bs-dpop-opac-velocity', 'Opacity · Velocity'],
-            random:   ['bs-dpop-opac-random',   'Opacity · Random'],
-        };
-
-        function syncOpacSlider(): void {
-            const d = app.brushTool.getDescriptor();
-            const m = opacSel?.value ?? 'none';
-            let v = 0;
-            if (m === 'pressure') v = d.opacityPressureCurve.max;
-            else if (m === 'velocity') v = d.opacitySpeedCurve.max;
-            else if (m === 'random')   v = d.opacityJitter;
-            if (opacSl) opacSl.value = String(Math.round(v * 100));
-            if (opacVl) opacVl.value = Math.round(v * 100) + '%';
-        }
-
-        opacSel?.addEventListener('change', () => {
-            const mode = opacSel.value;
-            const d    = app.brushTool.getDescriptor();
-            d.pressureOpacity = 0;
-            if (mode !== 'pressure') d.opacityPressureCurve = { ...d.opacityPressureCurve, mode: 'off' };
-            if (mode !== 'velocity') d.opacitySpeedCurve    = { ...d.opacitySpeedCurve,    mode: 'off' };
-            if (mode !== 'random')   d.opacityJitter        = 0;
-            if (mode === 'pressure') d.opacityPressureCurve = activateCurve(d.opacityPressureCurve) as typeof d.opacityPressureCurve;
-            else if (mode === 'velocity') d.opacitySpeedCurve = activateCurve(d.opacitySpeedCurve) as typeof d.opacitySpeedCurve;
-            opacityCurveEditor?.setSpec(d.opacityPressureCurve);
-            opacitySpeedCurveEditor?.setSpec(d.opacitySpeedCurve);
-            opacBtn?.classList.toggle('grayed', mode === 'none');
-            syncOpacSlider();
-            pushBrush();
-        });
-
-        opacSl?.addEventListener('input', () => {
-            const pct  = parseInt(opacSl.value) / 100;
-            if (opacVl) opacVl.value = Math.round(pct * 100) + '%';
-            const mode = opacSel?.value ?? 'none';
-            const d    = app.brushTool.getDescriptor();
-            if (mode === 'pressure') { d.opacityPressureCurve = { ...d.opacityPressureCurve, max: pct }; opacityCurveEditor?.setSpec(d.opacityPressureCurve); }
-            else if (mode === 'velocity') { d.opacitySpeedCurve = { ...d.opacitySpeedCurve, max: pct }; opacitySpeedCurveEditor?.setSpec(d.opacitySpeedCurve); }
-            else if (mode === 'random')   { d.opacityJitter = pct; }
-            pushBrush();
-        });
-
-        opacBtn?.addEventListener('click', () => {
-            const mode = opacSel?.value ?? 'none';
-            if (mode === 'none') return;
-            const [grpId, hd] = OPAC_GROUPS[mode];
-            showDynPopup(grpId, hd, opacBtn);
-        });
-
-        // ── FLOW row ──────────────────────────────────────────────────────────
-        const flowSl  = document.getElementById('bs-dyn-flow-sl')  as HTMLInputElement;
-        const flowVl  = document.getElementById('bs-dyn-flow-vl')  as HTMLInputElement;
-        const flowSel = document.getElementById('bs-dyn-flow-sel') as HTMLSelectElement;
-        const flowBtn = document.getElementById('bs-dyn-flow-btn') as HTMLButtonElement;
-
-        function syncFlowSlider(): void {
-            const d = app.brushTool.getDescriptor();
-            const v = (flowSel?.value === 'pressure') ? d.flowPressureCurve.max : 0;
-            if (flowSl) flowSl.value = String(Math.round(v * 100));
-            if (flowVl) flowVl.value = Math.round(v * 100) + '%';
-        }
-
-        flowSel?.addEventListener('change', () => {
-            const mode = flowSel.value;
-            const d    = app.brushTool.getDescriptor();
-            if (mode !== 'pressure') d.flowPressureCurve = { ...d.flowPressureCurve, mode: 'off' };
-            if (mode === 'pressure') d.flowPressureCurve = activateCurve(d.flowPressureCurve) as typeof d.flowPressureCurve;
-            flowCurveEditor?.setSpec(d.flowPressureCurve);
-            flowBtn?.classList.toggle('grayed', mode === 'none');
-            syncFlowSlider();
-            pushBrush();
-        });
-
-        flowSl?.addEventListener('input', () => {
-            const pct  = parseInt(flowSl.value) / 100;
-            if (flowVl) flowVl.value = Math.round(pct * 100) + '%';
-            const d = app.brushTool.getDescriptor();
-            if (flowSel?.value === 'pressure') { d.flowPressureCurve = { ...d.flowPressureCurve, max: pct }; flowCurveEditor?.setSpec(d.flowPressureCurve); }
-            pushBrush();
-        });
-
-        flowBtn?.addEventListener('click', () => {
-            if (flowSel?.value !== 'pressure') return;
-            showDynPopup('bs-dpop-flow-pressure', 'Flow · Pressure', flowBtn);
-        });
-
-        // ── Popup velocity/tilt curve min/max ─────────────────────────────────
-        bind('bs-size-vel-min', 'bs-size-vel-min-val', '%', v => {
-            const d = app.brushTool.getDescriptor();
-            d.sizeSpeedCurve = { ...d.sizeSpeedCurve, min: v };
-            sizeSpeedCurveEditor?.setSpec(d.sizeSpeedCurve);
-            pushBrush();
-        });
-        bind('bs-size-vel-max', 'bs-size-vel-max-val', '%', v => {
-            const d = app.brushTool.getDescriptor();
-            d.sizeSpeedCurve = { ...d.sizeSpeedCurve, max: v };
-            sizeSpeedCurveEditor?.setSpec(d.sizeSpeedCurve);
-            syncSizeSlider();
-            pushBrush();
-        });
-        bind('bs-size-tlt-min', 'bs-size-tlt-min-val', '%', v => {
-            const d = app.brushTool.getDescriptor();
-            d.sizeTiltCurve = { ...d.sizeTiltCurve, min: v };
-            sizeTiltCurveEditor?.setSpec(d.sizeTiltCurve);
-            pushBrush();
-        });
-        bind('bs-size-tlt-max', 'bs-size-tlt-max-val', '%', v => {
-            const d = app.brushTool.getDescriptor();
-            d.sizeTiltCurve = { ...d.sizeTiltCurve, max: v };
-            sizeTiltCurveEditor?.setSpec(d.sizeTiltCurve);
-            syncSizeSlider();
-            pushBrush();
-        });
-        bind('bs-opac-vel-min', 'bs-opac-vel-min-val', '%', v => {
-            const d = app.brushTool.getDescriptor();
-            d.opacitySpeedCurve = { ...d.opacitySpeedCurve, min: v };
-            opacitySpeedCurveEditor?.setSpec(d.opacitySpeedCurve);
-            pushBrush();
-        });
-        bind('bs-opac-vel-max', 'bs-opac-vel-max-val', '%', v => {
-            const d = app.brushTool.getDescriptor();
-            d.opacitySpeedCurve = { ...d.opacitySpeedCurve, max: v };
-            opacitySpeedCurveEditor?.setSpec(d.opacitySpeedCurve);
-            syncOpacSlider();
-            pushBrush();
-        });
-        bind('bs-flow-min', 'bs-flow-min-val', '%', v => { app.brushTool.getDescriptor().flowMin = v; pushBrush(); });
-        bind('bs-flow-max', 'bs-flow-max-val', '%', v => { app.brushTool.getDescriptor().flowMax = v; pushBrush(); });
     }
 
     // ── Existing controls ─────────────────────────────────────────────────────
@@ -771,10 +731,6 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
     bind('bs-smudge-dilution', 'bs-smudge-dilution-val', '%', v => { app.brushTool.setDilution(v); app.smudgeTool.setDilution(v); });
     bind('bs-smudge-attack',   'bs-smudge-attack-val',   '%', v => { app.brushTool.setAttack(v);   app.smudgeTool.setAttack(v);   });
     bind('bs-smudge-grade',    'bs-smudge-grade-val',    '%', v => { app.brushTool.setGrade(v);    app.smudgeTool.setGrade(v);    });
-    bind('bs-pres-size',   'bs-pres-size-val',   '%', v => { app.brushTool.getDescriptor().pressureSize    = v; pushBrush(); });
-    bind('bs-pres-opac',   'bs-pres-opac-val',   '%', v => { app.brushTool.getDescriptor().pressureOpacity = v; pushBrush(); });
-    bind('bs-size-jitter', 'bs-size-jitter-val', '%', v => { app.brushTool.getDescriptor().sizeJitter      = v; pushBrush(); });
-    bind('bs-opac-jitter', 'bs-opac-jitter-val', '%', v => { app.brushTool.getDescriptor().opacityJitter   = v; pushBrush(); });
 
     // ── Shape ─────────────────────────────────────────────────────────────────
 
@@ -794,47 +750,49 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         pushBrush();
     });
 
-    // ── Scatter ───────────────────────────────────────────────────────────────
-
-    bindRaw('bs-angle-jitter', 'bs-angle-jitter-val', '°', 1, v => { app.brushTool.getDescriptor().angleJitter = v; pushBrush(); });
-    // Scatter X/Y: slider 0-100 → value 0.0-0.1 (10% of canvas width max)
-    bindRaw('bs-scatter-x', 'bs-scatter-x-val', '%', 1000, v => { app.brushTool.getDescriptor().scatterX = v; pushBrush(); });
-    bindRaw('bs-scatter-y', 'bs-scatter-y-val', '%', 1000, v => { app.brushTool.getDescriptor().scatterY = v; pushBrush(); });
-    bindRaw('bs-stamp-count', 'bs-stamp-count-val', '', 1, v => { app.brushTool.getDescriptor().stampCount = Math.max(1, Math.round(v)); pushBrush(); });
-
     // ── Color Dynamics ────────────────────────────────────────────────────────
 
     bindRaw('bs-hue-jitter',    'bs-hue-jitter-val',    '°', 1, v => { app.brushTool.getDescriptor().hueJitter = v; pushBrush(); });
     bind(   'bs-sat-jitter',    'bs-sat-jitter-val',    '%',    v => { app.brushTool.getDescriptor().satJitter = v; pushBrush(); });
     bind(   'bs-val-jitter',    'bs-val-jitter-val',    '%',    v => { app.brushTool.getDescriptor().valJitter = v; pushBrush(); });
-    bind(   'bs-fg-bg-mix',     'bs-fg-bg-mix-val',     '%',    v => { app.brushTool.getDescriptor().colorFgBgMix = v; pushBrush(); });
     bindRaw('bs-hue-jitter-ps', 'bs-hue-jitter-ps-val', '°', 1, v => { app.brushTool.getDescriptor().hueJitterPerStroke = v; pushBrush(); });
     bind(   'bs-sat-jitter-ps', 'bs-sat-jitter-ps-val', '%',    v => { app.brushTool.getDescriptor().satJitterPerStroke = v; pushBrush(); });
     bind(   'bs-val-jitter-ps', 'bs-val-jitter-ps-val', '%',    v => { app.brushTool.getDescriptor().valJitterPerStroke = v; pushBrush(); });
-
-    // ── Tapering (slider 0-100 → 0.0-0.20 in normalized canvas units) ─────────
-
-    bindRaw('bs-taper-start', 'bs-taper-start-val', '%', 500, v => { app.brushTool.getDescriptor().taperStart = v; pushBrush(); });
-    bindRaw('bs-taper-end',   'bs-taper-end-val',   '%', 500, v => { app.brushTool.getDescriptor().taperEnd   = v; pushBrush(); });
-    bindToggle('bs-taper-size', on => { app.brushTool.getDescriptor().taperSizeLink    = on; pushBrush(); });
-    bindToggle('bs-taper-opac', on => { app.brushTool.getDescriptor().taperOpacityLink = on; pushBrush(); });
 
     // ── Stabilization (slider 0-100 → 0.0-0.20 normalized canvas units) ───────
 
     bind('bs-smoothing', 'bs-smoothing-val', '%', v => { app.brushTool.getDescriptor().smoothing = v; pushBrush(); });
     bindRaw('bs-pull-string', 'bs-pull-string-val', '%', 500, v => { app.brushTool.getDescriptor().pullStringLength = v; pushBrush(); });
     bindToggle('bs-catch-up', on => { app.brushTool.getDescriptor().catchUpEnabled = on; pushBrush(); });
-    bindToggle('bs-jitter-seed-lock', on => { app.brushTool.getDescriptor().jitterSeedLock = on; pushBrush(); });
 
     // ── Additional dynamics sliders ───────────────────────────────────────────
     bind('bs-size-min', 'bs-size-min-val', '%', v => { app.brushTool.getDescriptor().sizeMin = v; pushBrush(); });
     bind('bs-size-max', 'bs-size-max-val', '%', v => { app.brushTool.getDescriptor().sizeMax = v; pushBrush(); });
     bind('bs-opac-min', 'bs-opac-min-val', '%', v => { app.brushTool.getDescriptor().opacityMin = v; pushBrush(); });
     bind('bs-opac-max', 'bs-opac-max-val', '%', v => { app.brushTool.getDescriptor().opacityMax = v; pushBrush(); });
-    bindRaw('bs-stamp-count-jitter', 'bs-stamp-count-jitter-val', '', 1, v => { app.brushTool.getDescriptor().stampCountJitter = Math.max(0, Math.round(v)); pushBrush(); });
     bind('bs-roundness-min',   'bs-roundness-min-val', '%', v => { app.brushTool.getDescriptor().roundnessMin = v; pushBrush(); });
     bind('bs-tilt-influence',  'bs-tilt-influence-val', '%', v => { app.brushTool.getDescriptor().tiltAngleInfluence = v; pushBrush(); });
+    bindToggle('bs-tilt-enabled', on => {
+        app.brushTool.getDescriptor().tiltEnabled = on;
+        app.setBrushTiltActive(on);
+        pushBrush();
+    });
     bindToggle('bs-tilt-shape', on => { app.brushTool.getDescriptor().tiltShape = on; pushBrush(); });
+
+    // ── Glaze / Accumulation mode ─────────────────────────────────────────────
+    const glazeModes = ['off', 'light', 'uniform', 'heavy', 'intense'] as const;
+    const glazeBtnIds = ['bs-glaze-off', 'bs-glaze-light', 'bs-glaze-uniform', 'bs-glaze-heavy', 'bs-glaze-intense'];
+    const setGlazeMode = (mode: typeof glazeModes[number]) => {
+        app.brushTool.getDescriptor().glazeMode = mode;
+        app.pipeline.brushRenderer.setGlazeMode(mode);
+        glazeBtnIds.forEach((id, i) =>
+            document.getElementById(id)?.classList.toggle('active', glazeModes[i] === mode)
+        );
+        pushBrush();
+    };
+    glazeBtnIds.forEach((id, i) =>
+        document.getElementById(id)?.addEventListener('click', () => setGlazeMode(glazeModes[i]))
+    );
     bind('bs-wet-pressure', 'bs-wet-pressure-val', '%', v => {
         const d = app.brushTool.getDescriptor();
         if (v < 0.01) {
@@ -845,28 +803,6 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         pushBrush();
     });
 
-    // ── Bristle ───────────────────────────────────────────────────────────────
-    {
-        const sl  = document.getElementById('bs-bristle-count')  as HTMLInputElement | null;
-        const txt = document.getElementById('bs-bristle-count-val') as HTMLInputElement | null;
-        sl?.addEventListener('input', () => {
-            const n = parseInt(sl.value);
-            if (txt) txt.value = String(n);
-            app.brushTool.getDescriptor().bristleCount = n;
-            pushBrush();
-        });
-    }
-    {
-        const sl  = document.getElementById('bs-bristle-length')  as HTMLInputElement | null;
-        const txt = document.getElementById('bs-bristle-length-val') as HTMLInputElement | null;
-        sl?.addEventListener('input', () => {
-            const v = parseFloat(sl.value) / 100;
-            if (txt) txt.value = v.toFixed(2);
-            app.brushTool.getDescriptor().bristleLength = v;
-            pushBrush();
-        });
-    }
-
     // ── Wet Mixing ────────────────────────────────────────────────────────────
 
     bind('bs-wetness',    'bs-wetness-val',    '%', v => { app.brushTool.getDescriptor().wetness   = v; pushBrush(); });
@@ -875,12 +811,8 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
 
     // ── Texture / Grain ───────────────────────────────────────────────────────
 
-    const GRAIN_BLEND_MODES: Array<'multiply'|'screen'|'overlay'|'normal'> = ['multiply','screen','overlay','normal'];
-    const GRAIN_BLEND_IDS = ['bs-grain-multiply','bs-grain-screen','bs-grain-overlay','bs-grain-normal'];
-
     const syncGrainConfig = () => {
         const d = app.brushTool.getDescriptor();
-        const blendMap: Record<string,number> = { multiply:0, screen:1, overlay:2, normal:3 };
         app.pipeline.brushRenderer.setConfig({
             blendMode:       'normal',
             grainDepth:      d.grainDepth,
@@ -888,28 +820,44 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
             grainRotation:   d.grainRotation * Math.PI / 180,
             grainContrast:   d.grainContrast,
             grainBrightness: d.grainBrightness,
-            grainBlendMode:  blendMap[d.grainBlendMode] ?? 0,
+            grainBlendMode:  0,
             grainStatic:     d.grainStatic,
         });
     };
 
-    bind(   'bs-grain-depth',       'bs-grain-depth-val',      '%', v => { app.brushTool.getDescriptor().grainDepth        = v;               pushBrush(); syncGrainConfig(); });
-    bindRaw('bs-grain-scale',       'bs-grain-scale-val',      '', 100, v => { app.brushTool.getDescriptor().grainScale    = Math.max(0.05, v); pushBrush(); syncGrainConfig(); });
-    bindRaw('bs-grain-rotation',    'bs-grain-rotation-val',   '°',  1, v => { app.brushTool.getDescriptor().grainRotation = v;                 pushBrush(); syncGrainConfig(); });
-    bindRaw('bs-grain-contrast',    'bs-grain-contrast-val',   '', 100, v => { app.brushTool.getDescriptor().grainContrast  = Math.max(0.1, v); pushBrush(); syncGrainConfig(); });
-    bindRaw('bs-grain-brightness',  'bs-grain-brightness-val', '', 100, v => { app.brushTool.getDescriptor().grainBrightness = v;               pushBrush(); syncGrainConfig(); });
-    bindToggle('bs-grain-static', on => { app.brushTool.getDescriptor().grainStatic = on; pushBrush(); syncGrainConfig(); });
+    const updateGrainPreview = () => {
+        const canvas = document.getElementById('bs-grain-preview') as HTMLCanvasElement | null;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const d = app.brushTool.getDescriptor();
+        const W = canvas.width, H = canvas.height;
+        const srcSize = 256;
+        const pixels = app.pipeline.brushRenderer.getGrainPixelData(d.grainIndex);
+        if (!pixels) { ctx.clearRect(0, 0, W, H); return; }
+        const imgData = ctx.createImageData(srcSize, srcSize);
+        for (let i = 0; i < srcSize * srcSize; i++) {
+            const raw = pixels[i * 4] / 255;
+            const g = Math.max(0, Math.min(1, (raw - 0.5) * d.grainContrast + 0.5 + d.grainBrightness));
+            const v = Math.round(g * 255);
+            imgData.data[i * 4 + 0] = v;
+            imgData.data[i * 4 + 1] = v;
+            imgData.data[i * 4 + 2] = v;
+            imgData.data[i * 4 + 3] = 255;
+        }
+        const offscreen = new OffscreenCanvas(srcSize, srcSize);
+        offscreen.getContext('2d')!.putImageData(imgData, 0, 0);
+        ctx.clearRect(0, 0, W, H);
+        const displayScale = Math.max(0.05, d.grainScale);
+        ctx.drawImage(offscreen, 0, 0, W / displayScale, H / displayScale, 0, 0, W, H);
+    };
 
-    GRAIN_BLEND_IDS.forEach((id, i) => {
-        document.getElementById(id)?.addEventListener('click', () => {
-            GRAIN_BLEND_IDS.forEach((bid, j) =>
-                document.getElementById(bid)?.classList.toggle('active', i === j)
-            );
-            app.brushTool.getDescriptor().grainBlendMode = GRAIN_BLEND_MODES[i];
-            pushBrush();
-            syncGrainConfig();
-        });
-    });
+    bind(   'bs-grain-depth',       'bs-grain-depth-val',      '%', v => { app.brushTool.getDescriptor().grainDepth        = v;               pushBrush(); syncGrainConfig(); updateGrainPreview(); });
+    bindRaw('bs-grain-scale',       'bs-grain-scale-val',      '', 100, v => { app.brushTool.getDescriptor().grainScale    = Math.max(0.05, v); pushBrush(); syncGrainConfig(); updateGrainPreview(); });
+    bindRaw('bs-grain-rotation',    'bs-grain-rotation-val',   '°',  1, v => { app.brushTool.getDescriptor().grainRotation = v;                 pushBrush(); syncGrainConfig(); updateGrainPreview(); });
+    bindRaw('bs-grain-contrast',    'bs-grain-contrast-val',   '', 100, v => { app.brushTool.getDescriptor().grainContrast  = Math.max(0.1, v); pushBrush(); syncGrainConfig(); updateGrainPreview(); });
+    bindRaw('bs-grain-brightness',  'bs-grain-brightness-val', '', 100, v => { app.brushTool.getDescriptor().grainBrightness = v;               pushBrush(); syncGrainConfig(); updateGrainPreview(); });
+    bindToggle('bs-grain-static', on => { app.brushTool.getDescriptor().grainStatic = on; pushBrush(); syncGrainConfig(); updateGrainPreview(); });
 
     // ── Grain library thumbnails ──────────────────────────────────────────────
     {
@@ -938,6 +886,7 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
                         app.brushTool.getDescriptor().grainIndex = -1;
                     }
                     pushBrush();
+                    updateGrainPreview();
                 });
                 libraryEl.appendChild(btn);
             });
@@ -964,8 +913,9 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
                 });
                 app.pipeline.device.queue.copyExternalImageToTexture({ source: bmp }, { texture: tipTexture }, [256, 256]);
                 drawThumb('bs-tip-thumb', bmp);
+                app.setBrushTipBitmap(bmp);
                 bmp.close();
-                app.pipeline.brushRenderer.setTipTexture(tipTexture);
+                app.pipeline.setTipTexture(tipTexture);
                 const nameEl = document.getElementById('bs-tip-name');
                 if (nameEl) nameEl.textContent = file.name.replace(/\.[^.]+$/, '');
                 document.getElementById('bs-tip-clear-row')?.style.setProperty('display', '');
@@ -973,7 +923,8 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         });
         document.getElementById('bs-tip-clear-btn')?.addEventListener('click', () => {
             tipTexture?.destroy(); tipTexture = null;
-            app.pipeline.brushRenderer.setTipTexture(null);
+            app.pipeline.setTipTexture(null);
+            app.setBrushTipBitmap(null);
             clearThumb('bs-tip-thumb');
             const nameEl = document.getElementById('bs-tip-name');
             if (nameEl) nameEl.textContent = 'Procedural (none)';
@@ -1027,6 +978,28 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
     const setText = (id: string, t: string) => { const el = document.getElementById(id); if (el) el.textContent = t; };
     const setToggleEl = (id: string, on: boolean) => { document.getElementById(id)?.classList.toggle('on', on); };
 
+    // ── Tab rail ──────────────────────────────────────────────────────────────
+    const tabRail = document.getElementById('bsTabRail');
+
+    const setTabVisible = (target: string, visible: boolean) => {
+        const tab = tabRail?.querySelector<HTMLElement>(`.la-tab[data-target="${target}"]`);
+        if (!tab) return;
+        tab.style.display = visible ? '' : 'none';
+        if (!visible && tab.classList.contains('active')) {
+            tabRail?.querySelector<HTMLElement>('.la-tab[data-target="la-general"]')?.click();
+        }
+    };
+
+    tabRail?.addEventListener('click', e => {
+        const tab = (e.target as HTMLElement).closest('.la-tab') as HTMLElement | null;
+        if (!tab) return;
+        tabRail.querySelectorAll('.la-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('#brushSettingsPanel .la-section').forEach(s => s.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset['target'];
+        if (target) document.getElementById(target)?.classList.add('active');
+    });
+
     const syncLayout = (tool: string) => {
         if (tool === 'SelectionTool' || tool === 'FillTool' || tool === 'EyedropperTool') {
             hide('bs-painting-section');
@@ -1038,26 +1011,28 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
             hide('bs-selection-section');
             if (tool === 'BrushTool') {
                 setText('bs-tool-title', 'Brush');
-                show('bs-flow-row'); show('bs-mix-row');
-                show('bs-pressure-section'); show('bs-scatter-section');
-                show('bs-brush-adv');
-                show('bs-smudge-section');
-                setText('bs-mix-label', 'Pull');
-                show('bs-smudge-attack-row'); show('bs-smudge-grade-row');
+                show('bs-flow-row');
+                setTabVisible('la-blend',       true);
+                setTabVisible('la-grain',       true);
+                setTabVisible('la-wetmix',      true);
+                setTabVisible('la-shape',       true);
+                setTabVisible('la-stroke-path', true);
             } else if (tool === 'EraserTool') {
                 setText('bs-tool-title', 'Eraser');
-                hide('bs-flow-row'); hide('bs-mix-row');
-                hide('bs-pressure-section'); hide('bs-scatter-section');
-                hide('bs-brush-adv');
-                hide('bs-smudge-section');
+                hide('bs-flow-row');
+                setTabVisible('la-blend',       false);
+                setTabVisible('la-grain',       false);
+                setTabVisible('la-wetmix',      false);
+                setTabVisible('la-shape',       true);
+                setTabVisible('la-stroke-path', true);
             } else if (tool === 'SmudgeTool') {
                 setText('bs-tool-title', 'Smudge');
-                hide('bs-flow-row'); show('bs-mix-row');
-                show('bs-pressure-section'); show('bs-scatter-section');
-                show('bs-brush-adv');
-                show('bs-smudge-section');
-                setText('bs-mix-label', 'Pull');
-                show('bs-smudge-attack-row'); show('bs-smudge-grade-row');
+                hide('bs-flow-row');
+                setTabVisible('la-blend',       true);
+                setTabVisible('la-grain',       false);
+                setTabVisible('la-wetmix',      false);
+                setTabVisible('la-shape',       true);
+                setTabVisible('la-stroke-path', true);
             }
         }
     };
@@ -1089,67 +1064,30 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         const flowPresStr = d.flowPressureCurve.mode === 'off' ? 0 : Math.round((1 - (d.flowPressureCurve.min ?? 0)) * 100);
         set('bs-pres-flow', flowPresStr); setTxt('bs-pres-flow-val', flowPresStr + '%');
 
-        // Curve editors
-        sizeCurveEditor?.setSpec(d.sizePressureCurve);
-        sizeTiltCurveEditor?.setSpec(d.sizeTiltCurve);
-        sizeSpeedCurveEditor?.setSpec(d.sizeSpeedCurve);
-        opacityCurveEditor?.setSpec(d.opacityPressureCurve);
-        opacitySpeedCurveEditor?.setSpec(d.opacitySpeedCurve);
-        flowCurveEditor?.setSpec(d.flowPressureCurve);
-        roundnessTiltCurveEditor?.setSpec(d.roundnessTiltCurve);
-        roundnessPressureCurveEditor?.setSpec(d.roundnessPressureCurve);
-        scatterPressureCurveEditor?.setSpec(d.scatterPressureCurve);
-        grainDepthCurveEditor?.setSpec(d.grainDepthCurve);
-        colorMixCurveEditor?.setSpec(d.colorMixPressureCurve);
-
-        // Scatter
-        set('bs-angle-jitter', Math.round(d.angleJitter));  setTxt('bs-angle-jitter-val', Math.round(d.angleJitter) + '°');
-        set('bs-scatter-x',    Math.round(d.scatterX * 1000)); setTxt('bs-scatter-x-val', Math.round(d.scatterX * 1000) + '%');
-        set('bs-scatter-y',    Math.round(d.scatterY * 1000)); setTxt('bs-scatter-y-val', Math.round(d.scatterY * 1000) + '%');
-        set('bs-stamp-count',  d.stampCount);               setTxt('bs-stamp-count-val', String(d.stampCount));
-
         // Color Dynamics
         set('bs-hue-jitter',    Math.round(d.hueJitter));    setTxt('bs-hue-jitter-val',    Math.round(d.hueJitter) + '°');
         set('bs-sat-jitter',    pct(d.satJitter));            setTxt('bs-sat-jitter-val',    pct(d.satJitter) + '%');
         set('bs-val-jitter',    pct(d.valJitter));            setTxt('bs-val-jitter-val',    pct(d.valJitter) + '%');
-        set('bs-fg-bg-mix',     pct(d.colorFgBgMix));        setTxt('bs-fg-bg-mix-val',     pct(d.colorFgBgMix) + '%');
         set('bs-hue-jitter-ps', Math.round(d.hueJitterPerStroke)); setTxt('bs-hue-jitter-ps-val', Math.round(d.hueJitterPerStroke) + '°');
         set('bs-sat-jitter-ps', pct(d.satJitterPerStroke));  setTxt('bs-sat-jitter-ps-val', pct(d.satJitterPerStroke) + '%');
         set('bs-val-jitter-ps', pct(d.valJitterPerStroke));  setTxt('bs-val-jitter-ps-val', pct(d.valJitterPerStroke) + '%');
 
-        // Tapering (0-0.20 → slider 0-100, multiply by 500)
-        set('bs-taper-start', Math.round(d.taperStart * 500)); setTxt('bs-taper-start-val', Math.round(d.taperStart * 500) + '%');
-        set('bs-taper-end',   Math.round(d.taperEnd   * 500)); setTxt('bs-taper-end-val',   Math.round(d.taperEnd   * 500) + '%');
-        setToggleEl('bs-taper-size', d.taperSizeLink);
-        setToggleEl('bs-taper-opac', d.taperOpacityLink);
-
         // Stabilization (0-0.20 → slider 0-100)
         set('bs-pull-string', Math.round(d.pullStringLength * 500)); setTxt('bs-pull-string-val', Math.round(d.pullStringLength * 500) + '%');
         setToggleEl('bs-catch-up', d.catchUpEnabled);
-        setToggleEl('bs-jitter-seed-lock', d.jitterSeedLock ?? false);
 
         // Additional dynamics
         set('bs-size-min',  pct(d.sizeMin));          setTxt('bs-size-min-val',  pct(d.sizeMin) + '%');
         set('bs-size-max',  pct(d.sizeMax === 0 ? 1 : d.sizeMax));  setTxt('bs-size-max-val',  pct(d.sizeMax === 0 ? 1 : d.sizeMax) + '%');
         set('bs-opac-min',  pct(d.opacityMin));        setTxt('bs-opac-min-val',  pct(d.opacityMin) + '%');
         set('bs-opac-max',  pct(d.opacityMax === 0 ? 1 : d.opacityMax)); setTxt('bs-opac-max-val',  pct(d.opacityMax === 0 ? 1 : d.opacityMax) + '%');
-        set('bs-stamp-count-jitter', d.stampCountJitter);  setTxt('bs-stamp-count-jitter-val', String(d.stampCountJitter));
         set('bs-roundness-min',  pct(d.roundnessMin));  setTxt('bs-roundness-min-val',  pct(d.roundnessMin) + '%');
         set('bs-tilt-influence', pct(d.tiltAngleInfluence)); setTxt('bs-tilt-influence-val', pct(d.tiltAngleInfluence) + '%');
+        setToggleEl('bs-tilt-enabled', d.tiltEnabled ?? false);
+        app.setBrushTiltActive(d.tiltEnabled ?? false);
         setToggleEl('bs-tilt-shape', d.tiltShape);
         const wetPresStr = d.wetnessPressureCurve?.mode === 'off' ? 0 : Math.round((1 - (d.wetnessPressureCurve?.min ?? 0)) * 100);
         set('bs-wet-pressure', wetPresStr); setTxt('bs-wet-pressure-val', wetPresStr + '%');
-
-        // Dynamics (pressure)
-        set('bs-pres-size', pct(d.pressureSize)); setTxt('bs-pres-size-val', pct(d.pressureSize) + '%');
-        set('bs-pres-opac', pct(d.pressureOpacity)); setTxt('bs-pres-opac-val', pct(d.pressureOpacity) + '%');
-        set('bs-size-jitter', pct(d.sizeJitter)); setTxt('bs-size-jitter-val', pct(d.sizeJitter) + '%');
-        set('bs-opac-jitter', pct(d.opacityJitter)); setTxt('bs-opac-jitter-val', pct(d.opacityJitter) + '%');
-
-        // Bristle
-        set('bs-bristle-count',  d.bristleCount ?? 0);               setTxt('bs-bristle-count-val', String(d.bristleCount ?? 0));
-        set('bs-bristle-length', Math.round((d.bristleLength ?? 0.8) * 100));
-        setTxt('bs-bristle-length-val', (d.bristleLength ?? 0.8).toFixed(2));
 
         // Wet Mixing
         set('bs-wetness',    pct(d.wetness));             setTxt('bs-wetness-val',    pct(d.wetness) + '%');
@@ -1175,6 +1113,16 @@ function wireBrushSettings(app: PaintApp, brushPanel: BrushPanel, brushPresetsRe
         );
         syncGrainConfig();
         schedulePreview();
+
+        // Glaze mode
+        const gm = d.glazeMode ?? 'off';
+        app.pipeline.brushRenderer.setGlazeMode(gm);
+        glazeBtnIds.forEach((id, i) =>
+            document.getElementById(id)?.classList.toggle('active', glazeModes[i] === gm)
+        );
+
+        const hasPressureSize = (d.sizePressureCurve?.mode ?? 'off') !== 'off' || d.pressureSize > 0.01;
+        app.setBrushSizePressureActive(hasPressureSize);
     };
 
     app.bus.on('tool:change', ({ tool }) => {

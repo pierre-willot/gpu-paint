@@ -2,7 +2,7 @@ import type { PaintApp }          from '../core/app';
 import type { AutosaveManager }   from '../core/autosave-manager';
 import type { CanvasSizeDialog }  from './panels/canvas-size-dialog';
 
-const EFFECT_IDS = ['efx-hueSat', 'efx-colorBalance', 'efx-brightness', 'efx-curves', 'efx-blur', 'efx-noise', 'efx-sharpen'];
+const EFFECT_IDS = ['efx-hueSat', 'efx-colorBalance', 'efx-brightness', 'efx-curves', 'efx-blur'];
 
 // ── Effect panel helpers ──────────────────────────────────────────────────────
 
@@ -157,8 +157,6 @@ export class MenuManager {
         this.on('menu-brightness',    () => openEffect('efx-brightness'));
         this.on('menu-curves',        () => openEffect('efx-curves'));
         this.on('menu-blur',          () => openEffect('efx-blur'));
-        this.on('menu-noise',         () => openEffect('efx-noise'));
-        this.on('menu-sharpen',       () => openEffect('efx-sharpen'));
     }
 
     // ── View menu ─────────────────────────────────────────────────────────────
@@ -336,7 +334,7 @@ export class MenuManager {
         });
 
         // Placeholder panels — just wire close buttons
-        for (const key of ['colorBalance', 'brightness', 'curves', 'noise', 'sharpen']) {
+        for (const key of ['colorBalance', 'brightness', 'curves']) {
             document.getElementById(`efx-${key}-close`)?.addEventListener('click', () => closeEffect(`efx-${key}`));
         }
     }

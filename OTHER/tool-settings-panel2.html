@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tool Settings Panel — 2 Layouts</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+
+/* ── Reset ───────────────────────────────────────────────────────────────── */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+
+/* ── Tokens ──────────────────────────────────────────────────────────────── */
+:root{
+  --bg:#565b62;
+  --panel-bg:rgba(50,55,65,0.97);
+  --track-bg:rgba(22,26,34,0.85);
+  --border:rgba(255,255,255,0.09);
+  --border-hi:rgba(255,255,255,0.17);
+  --text-1:#f4f7fd;
+  --text-2:#ccd8ec;
+  --text-3:#8ea0b8;
+}
+
+/* ── Page ────────────────────────────────────────────────────────────────── */
+html{
+  min-height:100%;
+  background-color:var(--bg);
+  background-image:
+    linear-gradient(rgba(255,255,255,.08) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.08) 1px,transparent 1px),
+    linear-gradient(rgba(255,255,255,.15) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.15) 1px,transparent 1px);
+  background-size:16px 16px,16px 16px,80px 80px,80px 80px;
+}
+body{
+  min-height:100vh;
+  overflow-y:auto;
+  font-family:'DM Sans',sans-serif;
+  color:var(--text-1);
+  user-select:none;
+  display:flex;
+  align-items:flex-start;
+  justify-content:center;
+  gap:0;
+  padding:28px 24px 48px;
+}
+
+/* ── Shared panel shell ──────────────────────────────────────────────────── */
+.panel{
+  width:283px;
+  background:var(--panel-bg);
+  border:1px solid var(--border-hi);
+  border-radius:16px;
+  backdrop-filter:blur(28px) saturate(1.3);
+  -webkit-backdrop-filter:blur(28px) saturate(1.3);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.07) inset,
+    0 12px 40px rgba(0,0,0,.45),
+    0 2px 8px rgba(0,0,0,.28);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  position:relative;
+}
+
+/* drag pill */
+.panel::before{
+  content:'';
+  position:absolute;left:50%;top:8px;transform:translateX(-50%);
+  width:22px;height:3px;
+  background:rgba(255,255,255,.15);border-radius:2px;
+  pointer-events:none;z-index:1;
+}
+
+/* ── Shared header ───────────────────────────────────────────────────────── */
+.panel-hd{
+  display:flex;align-items:center;gap:8px;
+  padding:18px 12px 10px;
+  flex-shrink:0;
+}
+.panel-title{
+  flex:1;
+  font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-2);
+}
+.close-btn{
+  width:18px;height:18px;border-radius:5px;
+  background:transparent;border:1px solid transparent;
+  color:var(--text-3);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .12s,border-color .12s,color .12s;
+}
+.close-btn:hover{border-color:var(--border-hi);background:rgba(0,0,0,.2);color:var(--text-1)}
+
+/* ── Stroke preview ──────────────────────────────────────────────────────── */
+.stroke-preview{
+  display:block;
+  width:calc(100% - 16px);
+  height:56px;
+  border-radius:9px;
+  margin:0 8px 10px;
+  flex-shrink:0;
+  background:rgba(18,21,28,.6);
+  border:1px solid rgba(255,255,255,.06);
+}
+
+/* ── Shared slider row ───────────────────────────────────────────────────── */
+.sl-row{
+  display:flex;align-items:center;gap:8px;
+  padding:0 2px;margin-bottom:5px;
+}
+.sl-row:last-child{margin-bottom:0}
+.sl-lbl{
+  font-size:11px;color:var(--text-2);
+  width:58px;flex-shrink:0;
+}
+.sl{
+  flex:1;min-width:0;height:10px;
+  -webkit-appearance:none;appearance:none;
+  background:transparent;outline:none;cursor:pointer;touch-action:none;
+}
+.sl::-webkit-slider-runnable-track{
+  height:3px;border-radius:2px;
+  background:var(--track-bg);border:1px solid rgba(255,255,255,.07);
+}
+.sl::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:12px;height:12px;border-radius:50%;
+  background:transparent;border:1.5px solid rgba(255,255,255,.85);
+  margin-top:-4.5px;
+  box-shadow:0 1px 5px rgba(0,0,0,.5);
+  cursor:grab;transition:transform .08s,border-color .08s;
+}
+.sl::-webkit-slider-thumb:hover{transform:scale(1.2);border-color:#fff}
+.sl::-webkit-slider-thumb:active{cursor:grabbing}
+.sl::-moz-range-track{height:3px;border-radius:2px;background:var(--track-bg)}
+.sl::-moz-range-thumb{
+  width:12px;height:12px;border-radius:50%;
+  background:transparent;border:1.5px solid rgba(255,255,255,.85);
+  cursor:grab;
+}
+.sl-pct{
+  font-family:'DM Mono',monospace;font-size:10px;
+  color:var(--text-3);width:32px;text-align:right;flex-shrink:0;
+}
+
+/* ── Curve icon button ───────────────────────────────────────────────────── */
+.curve-btn{
+  width:22px;height:22px;border-radius:5px;flex-shrink:0;
+  background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.1);
+  color:var(--text-3);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .12s,color .12s;
+}
+.curve-btn:hover{background:rgba(255,255,255,.08);color:var(--text-1)}
+.curve-btn svg{display:block}
+
+/* ── Curve SVG shared ────────────────────────────────────────────────────── */
+.curve-svg{ display:block; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYOUT A  —  Left vertical tab rail + right content pane
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.la-body{
+  display:flex;
+  flex:1;min-height:0;
+  overflow:hidden;
+}
+
+/* tab rail */
+.la-tabs{
+  width:74px;flex-shrink:0;
+  display:flex;flex-direction:column;gap:3px;
+  padding:6px 5px 10px;
+  border-right:1px solid var(--border);
+  background:rgba(0,0,0,.12);
+}
+.la-tab{
+  height:30px;
+  border-radius:8px;
+  border:1px solid transparent;
+  background:transparent;
+  font-family:'DM Sans',sans-serif;
+  font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--text-3);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .12s,border-color .12s,color .12s;
+}
+.la-tab:hover{background:rgba(255,255,255,.05);color:var(--text-2)}
+.la-tab.active{
+  background:rgba(0,0,0,.3);
+  border-color:var(--border-hi);
+  color:var(--text-1);
+}
+
+/* right pane */
+.la-pane{
+  flex:1;min-width:0;
+  overflow-y:auto;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(255,255,255,.25) transparent;
+  padding:10px 10px 14px;
+}
+.la-pane::-webkit-scrollbar{width:4px}
+.la-pane::-webkit-scrollbar-thumb{background:rgba(255,255,255,.25);border-radius:2px}
+.la-pane::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.4)}
+
+.la-section{display:none}
+.la-section.active{display:block}
+
+
+/* ── Dynamics popup ──────────────────────────────────────────────────────── */
+.dyn-popup{
+  position:fixed;z-index:9000;
+  display:none;flex-direction:column;
+  width:330px;
+  background:rgba(36,40,50,0.99);
+  border:1px solid var(--border-hi);
+  border-radius:12px;
+  backdrop-filter:blur(28px) saturate(1.3);
+  -webkit-backdrop-filter:blur(28px) saturate(1.3);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.07) inset,
+    0 14px 38px rgba(0,0,0,.6),
+    0 2px 8px rgba(0,0,0,.3);
+  overflow:hidden;
+  animation:dynIn .1s ease;
+}
+.dyn-popup.open{display:flex}
+@keyframes dynIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+.dyn-popup-hd{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 12px 8px;
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.dyn-popup-title{
+  font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-2);
+}
+.dyn-popup-close{
+  width:18px;height:18px;border-radius:5px;
+  background:transparent;border:1px solid transparent;
+  color:var(--text-3);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .12s,border-color .12s,color .12s;
+}
+.dyn-popup-close:hover{border-color:var(--border-hi);background:rgba(0,0,0,.22);color:var(--text-1)}
+
+.dyn-popup-body{
+  padding:10px 12px 14px;
+  display:flex;flex-direction:column;gap:9px;
+}
+
+/* each dynamics row */
+.dyn-row{
+  display:flex;align-items:center;gap:7px;
+}
+.dyn-chk{
+  /* hide native */
+  -webkit-appearance:none;appearance:none;
+  width:13px;height:13px;flex-shrink:0;
+  border-radius:4px;
+  background:rgba(0,0,0,.28);
+  border:1px solid var(--border-hi);
+  cursor:pointer;
+  position:relative;
+  transition:background .12s,border-color .12s;
+}
+.dyn-chk:hover{
+  background:rgba(255,255,255,.06);
+  border-color:rgba(255,255,255,.3);
+}
+.dyn-chk:checked{
+  background:rgba(155,190,255,.18);
+  border-color:rgba(155,190,255,.6);
+}
+/* checkmark */
+.dyn-chk::after{
+  content:'';
+  position:absolute;
+  display:none;
+  left:3px;top:0px;
+  width:5px;height:7px;
+  border:1.5px solid rgba(190,215,255,.9);
+  border-top:none;border-left:none;
+  transform:rotate(45deg);
+}
+.dyn-chk:checked::after{display:block;}
+.dyn-name{
+  font-size:10px;color:var(--text-2);
+  width:84px;flex-shrink:0;white-space:nowrap;
+}
+.dyn-field{
+  font-family:'DM Mono',monospace;font-size:10px;
+  color:var(--text-3);background:transparent;
+  border:1px solid transparent;border-radius:6px;
+  padding:2px 0;width:33px;text-align:center;
+  outline:none;flex-shrink:0;
+  transition:background .12s,border-color .12s,color .12s;cursor:text;
+}
+.dyn-field:hover{border-color:var(--border);background:rgba(0,0,0,.15)}
+.dyn-field:focus{background:rgba(0,0,0,.35);border-color:var(--border-hi);color:var(--text-1)}
+
+/* ── Dual range slider ───────────────────────────────────────────────────── */
+.dual-wrap{
+  flex:1;min-width:0;
+  position:relative;height:18px;
+}
+/* the visible track bar */
+.dual-track{
+  position:absolute;
+  left:6px;right:6px; /* inset by half-thumb so fill aligns flush */
+  top:50%;transform:translateY(-50%);
+  height:3px;border-radius:2px;
+  background:var(--track-bg);
+  border:1px solid rgba(255,255,255,.07);
+  overflow:hidden;
+  pointer-events:none;
+}
+/* the active range fill */
+.dual-fill{
+  position:absolute;top:0;height:100%;
+  background:rgba(155,190,255,.28);
+  pointer-events:none;
+}
+/* both range inputs stacked */
+.dual-range{
+  position:absolute;
+  width:100%;height:100%;
+  top:0;left:0;
+  -webkit-appearance:none;appearance:none;
+  background:transparent;outline:none;
+  pointer-events:none; /* only thumb receives events */
+}
+.dual-range::-webkit-slider-runnable-track{background:transparent;height:3px}
+.dual-range::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:12px;height:12px;border-radius:50%;
+  background:transparent;
+  border:1.5px solid rgba(255,255,255,.85);
+  box-shadow:0 1px 5px rgba(0,0,0,.5);
+  cursor:grab;pointer-events:all;
+  transition:transform .08s,border-color .08s;
+  margin-top:-4.5px;
+}
+.dual-range::-webkit-slider-thumb:hover{transform:scale(1.2);border-color:#fff}
+.dual-range::-webkit-slider-thumb:active{cursor:grabbing}
+.dual-range::-moz-range-track{background:transparent;height:3px}
+.dual-range::-moz-range-thumb{
+  width:12px;height:12px;border-radius:50%;
+  background:transparent;border:1.5px solid rgba(255,255,255,.85);
+  cursor:grab;pointer-events:all;
+}
+
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════ PANEL A — Tab rail + pane ════════ -->
+<div class="panel" style="height:min(580px,90vh)">
+
+  <div class="panel-hd">
+    <span class="panel-title">Brush</span>
+    <button class="close-btn" title="Close">
+      <svg width="7" height="7" viewBox="0 0 7 7" fill="none">
+        <line x1=".5" y1=".5" x2="6.5" y2="6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="6.5" y1=".5" x2=".5" y2="6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <canvas class="stroke-preview" id="previewA" width="530" height="112"></canvas>
+
+  <div class="la-body">
+    <div class="la-tabs" id="tabsA">
+      <button class="la-tab active" data-target="la-core">Core</button>
+      <button class="la-tab"        data-target="la-blend">Blend</button>
+      <button class="la-tab"        data-target="la-texture">Texture</button>
+      <button class="la-tab"        data-target="la-wetmix">Wet Mix</button>
+      <button class="la-tab"        data-target="la-dynamics">Dynamics</button>
+      <button class="la-tab"        data-target="la-shape">Shape</button>
+      <button class="la-tab"        data-target="la-scatter">Scatter</button>
+    </div>
+
+    <div class="la-pane">
+
+      <!-- CORE -->
+      <div class="la-section active" id="la-core">
+        <div class="sl-row"><span class="sl-lbl">Size</span><input type="range" class="sl" min="0" max="100" value="55" oninput="pct(this)"><span class="sl-pct">55%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Opacity</span><input type="range" class="sl" min="0" max="100" value="15" oninput="pct(this)"><span class="sl-pct">15%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Flow</span><input type="range" class="sl" min="0" max="100" value="65" oninput="pct(this)"><span class="sl-pct">65%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Hardness</span><input type="range" class="sl" min="0" max="100" value="90" oninput="pct(this)"><span class="sl-pct">90%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- BLEND -->
+      <div class="la-section" id="la-blend">
+        <div class="sl-row"><span class="sl-lbl">Pull</span><input type="range" class="sl" min="0" max="100" value="55" oninput="pct(this)"><span class="sl-pct">55%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Charge</span><input type="range" class="sl" min="0" max="100" value="15" oninput="pct(this)"><span class="sl-pct">15%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Dilution</span><input type="range" class="sl" min="0" max="100" value="65" oninput="pct(this)"><span class="sl-pct">65%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Attack</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Grade</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- TEXTURE -->
+      <div class="la-section" id="la-texture">
+        <div class="sl-row"><span class="sl-lbl">Depth</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Scale</span><input type="range" class="sl" min="10" max="400" value="100" oninput="fscale(this)"><span class="sl-pct">1.0</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Contrast</span><input type="range" class="sl" min="50" max="300" value="100" oninput="fscale(this)"><span class="sl-pct">1.0</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Rotation</span><input type="range" class="sl" min="0" max="360" value="0" oninput="fdeg(this)"><span class="sl-pct">0°</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- WET MIX -->
+      <div class="la-section" id="la-wetmix">
+        <div class="sl-row"><span class="sl-lbl">Wetness</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Paint load</span><input type="range" class="sl" min="0" max="100" value="100" oninput="pct(this)"><span class="sl-pct">100%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Wet edge</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- DYNAMICS -->
+      <div class="la-section" id="la-dynamics">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:5px">Size</div>
+        <div class="sl-row"><span class="sl-lbl">Amount</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin:8px 0 5px">Opacity</div>
+        <div class="sl-row"><span class="sl-lbl">Amount</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin:8px 0 5px">Flow</div>
+        <div class="sl-row"><span class="sl-lbl">Amount</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- SHAPE -->
+      <div class="la-section" id="la-shape">
+        <div class="sl-row"><span class="sl-lbl">Spacing</span><input type="range" class="sl" min="0.5" max="30" step="0.5" value="10" oninput="pct(this)"><span class="sl-pct">10%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Roundness</span><input type="range" class="sl" min="0" max="100" value="100" oninput="pct(this)"><span class="sl-pct">100%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Angle</span><input type="range" class="sl" min="0" max="360" value="0" oninput="fdeg(this)"><span class="sl-pct">0°</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Smoothing</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <!-- SCATTER -->
+      <div class="la-section" id="la-scatter">
+        <div class="sl-row"><span class="sl-lbl">Scatter X</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Scatter Y</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Size jitter</span><input type="range" class="sl" min="0" max="100" value="0" oninput="pct(this)"><span class="sl-pct">0%</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+        <div class="sl-row"><span class="sl-lbl">Ang jitter</span><input type="range" class="sl" min="0" max="180" value="0" oninput="fdeg(this)"><span class="sl-pct">0°</span><button class="curve-btn"><svg class="curve-svg" width="14" height="10" viewBox="0 0 14 10" fill="none"><path d="M1 8C3 8 4 2 7 2C10 2 11 8 13 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+    </div><!-- /la-pane -->
+  </div><!-- /la-body -->
+
+</div><!-- /Panel A -->
+
+
+<!-- ══════════════════════════════════════ DYNAMICS POPUP ════════════════ -->
+<div class="dyn-popup" id="dynPopup">
+  <div class="dyn-popup-hd">
+    <span class="dyn-popup-title" id="dynPopupTitle">Dynamics</span>
+    <button class="dyn-popup-close" id="dynPopupClose">
+      <svg width="7" height="7" viewBox="0 0 7 7" fill="none">
+        <line x1=".5" y1=".5" x2="6.5" y2="6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="6.5" y1=".5" x2=".5" y2="6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+  <div class="dyn-popup-body">
+
+    <!-- Row: Pen pressure -->
+    <div class="dyn-row">
+      <input type="checkbox" class="dyn-chk" checked>
+      <span class="dyn-name">Pen pressure</span>
+      <input type="text" class="dyn-field dyn-min" value="0%">
+      <div class="dual-wrap">
+        <div class="dual-track"><div class="dual-fill"></div></div>
+        <input type="range" class="dual-range dual-lo" min="0" max="100" value="0">
+        <input type="range" class="dual-range dual-hi" min="0" max="100" value="100">
+      </div>
+      <input type="text" class="dyn-field dyn-max" value="100%">
+    </div>
+
+    <!-- Row: Tilt -->
+    <div class="dyn-row">
+      <input type="checkbox" class="dyn-chk">
+      <span class="dyn-name">Tilt</span>
+      <input type="text" class="dyn-field dyn-min" value="0%">
+      <div class="dual-wrap">
+        <div class="dual-track"><div class="dual-fill"></div></div>
+        <input type="range" class="dual-range dual-lo" min="0" max="100" value="0">
+        <input type="range" class="dual-range dual-hi" min="0" max="100" value="100">
+      </div>
+      <input type="text" class="dyn-field dyn-max" value="100%">
+    </div>
+
+    <!-- Row: Velocity -->
+    <div class="dyn-row">
+      <input type="checkbox" class="dyn-chk">
+      <span class="dyn-name">Velocity</span>
+      <input type="text" class="dyn-field dyn-min" value="0%">
+      <div class="dual-wrap">
+        <div class="dual-track"><div class="dual-fill"></div></div>
+        <input type="range" class="dual-range dual-lo" min="0" max="100" value="0">
+        <input type="range" class="dual-range dual-hi" min="0" max="100" value="100">
+      </div>
+      <input type="text" class="dyn-field dyn-max" value="100%">
+    </div>
+
+    <!-- Row: Random -->
+    <div class="dyn-row">
+      <input type="checkbox" class="dyn-chk">
+      <span class="dyn-name">Random</span>
+      <input type="text" class="dyn-field dyn-min" value="0%">
+      <div class="dual-wrap">
+        <div class="dual-track"><div class="dual-fill"></div></div>
+        <input type="range" class="dual-range dual-lo" min="0" max="100" value="0">
+        <input type="range" class="dual-range dual-hi" min="0" max="100" value="100">
+      </div>
+      <input type="text" class="dyn-field dyn-max" value="100%">
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* ── Value formatters ────────────────────────────────────────────────── */
+function pct(sl) {
+  sl.nextElementSibling.textContent = Math.round(sl.value) + '%';
+}
+function fdeg(sl) {
+  sl.nextElementSibling.textContent = Math.round(sl.value) + '°';
+}
+function fscale(sl) {
+  sl.nextElementSibling.textContent = (sl.value / 100).toFixed(1);
+}
+
+/* ── Panel A tab switching ───────────────────────────────────────────── */
+document.getElementById('tabsA').addEventListener('click', e => {
+  const tab = e.target.closest('.la-tab');
+  if (!tab) return;
+  document.querySelectorAll('#tabsA .la-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.la-section').forEach(s => s.classList.remove('active'));
+  tab.classList.add('active');
+  document.getElementById(tab.dataset.target).classList.add('active');
+});
+
+/* ── Stroke preview ──────────────────────────────────────────────────── */
+function drawStroke(id) {
+  const c = document.getElementById(id);
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  ctx.clearRect(0, 0, W, H);
+  for (let i = 0; i <= 180; i++) {
+    const t  = i / 180;
+    const x  = 32 + t * (W - 64);
+    const y  = H / 2 + Math.sin(t * Math.PI * 1.7 + .3) * H * .2;
+    const p  = .2 + .8 * Math.sin(t * Math.PI);
+    const r  = 5 + p * 18;
+    const g  = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0,    `rgba(215,228,255,${.2  * p})`);
+    g.addColorStop(.5,   `rgba(160,195,255,${.13 * p})`);
+    g.addColorStop(1,    'rgba(80,130,220,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+drawStroke('previewA');
+
+/* ── Dual slider initialiser ────────────────────────────────────────── */
+function initDualSlider(wrap) {
+  const lo   = wrap.querySelector('.dual-lo');
+  const hi   = wrap.querySelector('.dual-hi');
+  const fill = wrap.querySelector('.dual-fill');
+  const row  = wrap.closest('.dyn-row');
+  const minF = row.querySelector('.dyn-min');
+  const maxF = row.querySelector('.dyn-max');
+
+  function update() {
+    let loV = parseInt(lo.value);
+    let hiV = parseInt(hi.value);
+    // enforce lo <= hi
+    if (loV > hiV) { lo.value = hiV; loV = hiV; }
+    if (hiV < loV) { hi.value = loV; hiV = loV; }
+    // fill: positioned inside .dual-track (which is already inset 6px each side)
+    fill.style.left  = loV + '%';
+    fill.style.width = (hiV - loV) + '%';
+    minF.value = loV + '%';
+    maxF.value = hiV + '%';
+    // keep hi on top unless lo is being dragged near the end
+    lo.style.zIndex = loV > 90 ? 2 : 1;
+    hi.style.zIndex = loV > 90 ? 1 : 2;
+  }
+
+  lo.addEventListener('input', update);
+  hi.addEventListener('input', update);
+
+  // sync text fields back to sliders
+  minF.addEventListener('change', () => {
+    const v = parseInt(minF.value);
+    if (!isNaN(v)) { lo.value = Math.min(v, parseInt(hi.value)); update(); }
+  });
+  maxF.addEventListener('change', () => {
+    const v = parseInt(maxF.value);
+    if (!isNaN(v)) { hi.value = Math.max(v, parseInt(lo.value)); update(); }
+  });
+
+  update(); // paint initial fill
+}
+
+// init all dual sliders inside the popup
+document.querySelectorAll('#dynPopup .dual-wrap').forEach(initDualSlider);
+
+/* ── Dynamics popup open / close ────────────────────────────────────── */
+const popup      = document.getElementById('dynPopup');
+const popupTitle = document.getElementById('dynPopupTitle');
+const popupClose = document.getElementById('dynPopupClose');
+const POPUP_W    = 330; // matches CSS width
+const POPUP_H    = 185; // approx height (4 rows)
+const GAP        = 6;   // gap from button
+
+let openBtn = null; // track which btn opened the popup
+
+document.querySelectorAll('.curve-btn').forEach(btn => {
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+
+    // if same button, toggle closed
+    if (openBtn === btn && popup.classList.contains('open')) {
+      closePopup();
+      return;
+    }
+    openBtn = btn;
+
+    // find the slider row label to name the popup
+    const row   = btn.closest('.sl-row, .dyn-row');
+    const label = row ? (row.querySelector('.sl-lbl, .dyn-lbl') || {}).textContent : '';
+    popupTitle.textContent = (label ? label + ' — ' : '') + 'Dynamics';
+
+    // position: open to the right of the button
+    const rect = btn.getBoundingClientRect();
+    let left = rect.right + GAP;
+    let top  = rect.top;
+
+    // clamp horizontally if overflowing right edge
+    if (left + POPUP_W + 8 > window.innerWidth) left = rect.left - POPUP_W - GAP;
+    // clamp vertically
+    const maxTop = window.innerHeight - POPUP_H - 8;
+    if (top > maxTop) top = maxTop;
+    if (top < 8) top = 8;
+
+    popup.style.top  = top  + 'px';
+    popup.style.left = left + 'px';
+
+    // reset animation
+    popup.classList.remove('open');
+    void popup.offsetWidth; // reflow to restart animation
+    popup.classList.add('open');
+    btn.classList.add('active');
+  });
+});
+
+function closePopup() {
+  popup.classList.remove('open');
+  if (openBtn) { openBtn.classList.remove('active'); openBtn = null; }
+}
+
+popupClose.addEventListener('click', e => { e.stopPropagation(); closePopup(); });
+
+// close on outside click
+document.addEventListener('click', e => {
+  if (popup.classList.contains('open') && !popup.contains(e.target)) closePopup();
+});
+// stop clicks inside popup from bubbling to document
+popup.addEventListener('click', e => e.stopPropagation());
+
+</script>
+</body>
+</html>

@@ -31,7 +31,8 @@ struct Uniforms {
     charge:     f32,    // Step C: how much fresh paint is injected per stamp
     pull:       f32,    // Step B: how strongly canvas color is absorbed into carry
     dilution:   f32,    // Step D: deposit strength onto canvas
-    _pad:       vec2<f32>,
+    _pad0:      f32,
+    useTipTex:  u32,    // 1 = use tip texture for stamp mask
     user_color: vec4<f32>, // fresh paint, non-premultiplied RGBA (offset 32)
 };
 
@@ -54,6 +55,8 @@ struct VertexOut {
 @group(0) @binding(2) var          tex_b:   texture_2d<f32>;
 @group(0) @binding(3) var          texSmp:  sampler;
 @group(0) @binding(4) var          maskSmp: sampler;
+@group(0) @binding(5) var          tipTex:  texture_2d<f32>;
+@group(0) @binding(6) var          tipSmp:  sampler;
 
 @vertex
 fn vs_main(
@@ -96,19 +99,29 @@ fn vs_main(
 fn stamp_mask(in: VertexOut) -> f32 {
     let tilt_mag = length(in.tilt);
     var dist: f32;
+    var aspect: f32 = 1.0;
+    var c: f32 = 1.0; var s: f32 = 0.0;
     if tilt_mag < 0.5 && in.angle == 0.0 {
         dist = length(in.uv);
     } else {
-        let aspect = 1.0 + (tilt_mag / 90.0) * 2.0;
-        let c      = cos(-in.angle);
-        let s      = sin(-in.angle);
-        let rot    = vec2(in.uv.x * c - in.uv.y * s, in.uv.x * s + in.uv.y * c);
-        dist       = length(vec2(rot.x / aspect, rot.y));
+        aspect = 1.0 + (tilt_mag / 90.0) * 2.0;
+        c      = cos(-in.angle);
+        s      = sin(-in.angle);
+        let rot = vec2(in.uv.x * c - in.uv.y * s, in.uv.x * s + in.uv.y * c);
+        dist    = length(vec2(rot.x / aspect, rot.y));
     }
     if dist > 1.0 { return 0.0; }
     let aa    = clamp(1.5 / max(in.radius_px, 1.0), 0.01, 0.5);
     let hard  = smoothstep(1.0, 1.0 - aa, dist);
     let gauss = exp(-dist * dist * 5.54);
+    if u.useTipTex != 0u {
+        // Normalize uv to [-1,1] stamp space (undo aspect stretch), then rotate
+        let norm_uv = vec2(in.uv.x / aspect, in.uv.y);
+        let rot_uv  = vec2(norm_uv.x * c - norm_uv.y * s, norm_uv.x * s + norm_uv.y * c);
+        let tipUV   = clamp(rot_uv * 0.5 + vec2(0.5), vec2(0.0), vec2(1.0));
+        let tipAlpha = textureSampleLevel(tipTex, tipSmp, tipUV, 0.0).r;
+        return mix(gauss, tipAlpha, u.hardness) * hard;
+    }
     return mix(gauss, hard, u.hardness);
 }
 

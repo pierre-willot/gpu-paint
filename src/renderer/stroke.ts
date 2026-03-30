@@ -7,10 +7,7 @@ import {
     DLUT_OPACITY_PRESSURE, DLUT_OPACITY_SPEED,
     DLUT_FLOW_PRESSURE,
     DLUT_ROUNDNESS_TILT, DLUT_ROUNDNESS_PRESSURE,
-    DLUT_SCATTER_PRESSURE,
-    DLUT_GRAIN_DEPTH,
     DLUT_WETNESS_PRESSURE,
-    DLUT_COLOR_MIX,
 } from './dynamics-lut';
 
 // ── Internal point type ───────────────────────────────────────────────────────
@@ -59,18 +56,11 @@ export class StrokeEngine {
     // Per-stroke paint depletion charge (0..1)
     private paintCharge: number = 1.0;
 
-    // P8: Bristle — fixed per-stroke fiber offsets (in unit circle, rotated per stamp)
-    private bristleOffsets: { x: number; y: number }[] = [];
-
     // P9: Wet edge — per-stroke paint density accumulation grid
     private static readonly DENSITY_GRID = 192;
     private densityGrid: Float32Array = new Float32Array(
         StrokeEngine.DENSITY_GRID * StrokeEngine.DENSITY_GRID
     );
-
-    // End taper — recent stamps buffered until stroke ends
-    // Each entry: { floats: number[FLOATS_PER_STAMP], dist: number }
-    private tailBuffer: Array<{ floats: number[]; dist: number }> = [];
 
     public smoothingStrength: number = 0;
 
@@ -108,32 +98,16 @@ export class StrokeEngine {
         // Initialize paint charge from descriptor (re-fill on each new stroke)
         this.paintCharge = d.paintLoad;
 
-        // Seed PRNG — fixed seed locks scatter/jitter pattern across strokes
-        this.rngState = d.jitterSeedLock
-            ? ((d.jitterSeed * 2654435769) >>> 0) ^ 0xDE4DBE3F
-            : (Math.random() * 0xFFFFFFFF) >>> 0;
+        // Seed PRNG
+        this.rngState = (Math.random() * 0xFFFFFFFF) >>> 0;
 
         // Per-stroke color jitter
         this.strokeHueDelta  = (this.nextRand() - 0.5) * 2 * d.hueJitterPerStroke;
         this.strokeSatDelta  = (this.nextRand() - 0.5) * 2 * d.satJitterPerStroke;
         this.strokeValDelta  = (this.nextRand() - 0.5) * 2 * d.valJitterPerStroke;
 
-        // P8: Bristle — generate fixed fiber positions (unit circle, varied radius)
-        this.bristleOffsets = [];
-        if (d.bristleCount > 0) {
-            for (let i = 0; i < d.bristleCount; i++) {
-                const angle = (i / d.bristleCount) * Math.PI * 2;
-                // Vary radius per fiber for natural look; inner fibers get ~0.4, outer ~1.0
-                const r = 0.35 + (i % 3 === 0 ? 0.2 : 0.55) + this.nextRand() * 0.25;
-                this.bristleOffsets.push({ x: Math.cos(angle) * r, y: Math.sin(angle) * r });
-            }
-        }
-
         // P9: Wet edge — clear per-stroke density accumulator
         if (d.wetEdge > 0) this.densityGrid.fill(0);
-
-        // End taper — clear tail buffer for new stroke
-        this.tailBuffer = [];
 
         // Pull-string init
         this.pullX      = x;
@@ -189,46 +163,10 @@ export class StrokeEngine {
     }
 
     public flush(): Float32Array {
-        // Promote safe tail-buffer entries (definitely not in the taperEnd zone)
-        const d = this.descriptor;
-        const taperEnd = d?.taperEnd ?? 0;
-        if (taperEnd > 0 && this.tailBuffer.length > 0) {
-            const safeBelow = this.strokeDistance - taperEnd;
-            let kept = 0;
-            for (let i = 0; i < this.tailBuffer.length; i++) {
-                const entry = this.tailBuffer[i];
-                if (entry.dist <= safeBelow) {
-                    for (const f of entry.floats) this.stamps.push(f);
-                } else {
-                    this.tailBuffer[kept++] = entry;
-                }
-            }
-            this.tailBuffer.length = kept;
-        }
-
         if (this.stamps.length === 0) return new Float32Array();
         const data  = new Float32Array(this.stamps);
         this.stamps = [];
         return data;
-    }
-
-    // Called once at stroke end — applies linear opacity fade to buffered tail.
-    // Opacity is at float index 10 per stamp.
-    public flushTail(): Float32Array {
-        if (this.tailBuffer.length === 0) return new Float32Array();
-        const d = this.descriptor;
-        const taperEnd = d?.taperEnd ?? 0;
-        const result: number[] = [];
-        for (const entry of this.tailBuffer) {
-            const floats = entry.floats.slice();
-            if (taperEnd > 0) {
-                const t = Math.max(0, Math.min(1, (this.strokeDistance - entry.dist) / taperEnd));
-                floats[10] *= t; // opacity index
-            }
-            for (const f of floats) result.push(f);
-        }
-        this.tailBuffer = [];
-        return new Float32Array(result);
     }
 
     public endStroke(): void {
@@ -236,7 +174,6 @@ export class StrokeEngine {
         this.buffer         = [];
         this.distanceCarry  = 0;
         this.strokeDistance = 0;
-        this.tailBuffer     = [];
         this.predictor.reset();
     }
 
@@ -346,12 +283,13 @@ export class StrokeEngine {
         // skips all deformation (tilt_aspect=1, no azimuth rotation).
         // The shader always applies tilt when tiltX/Y are non-zero, so we must
         // explicitly pass 0,0 rather than relying on descriptor flags alone.
-        const anyTiltActive =
+        const anyTiltActive = d.tiltEnabled && (
             d.tiltShape ||
             d.tiltAngle ||
             d.tiltAngleInfluence > 0 ||
             d.sizeTiltCurve.mode      !== 'off' ||
-            d.roundnessTiltCurve.mode !== 'off';
+            d.roundnessTiltCurve.mode !== 'off'
+        );
         const stampTiltX = anyTiltActive ? tiltX : 0;
         const stampTiltY = anyTiltActive ? tiltY : 0;
 
@@ -428,24 +366,9 @@ export class StrokeEngine {
         } else if (d.tiltAngle && (tiltX !== 0 || tiltY !== 0)) {
             stampAngle = Math.atan2(Math.tan(tiltY * Math.PI / 180), Math.tan(tiltX * Math.PI / 180));
         }
-        stampAngle += (this.nextRand() - 0.5) * 2 * d.angleJitter * (Math.PI / 180);
-
-        // ── Scatter ───────────────────────────────────────────────────────────
-        let scatterScale = 1.0;
-        if (luts && d.scatterPressureCurve.mode !== 'off') {
-            scatterScale = sampleDynLUT(luts, DLUT_SCATTER_PRESSURE, effP);
-        }
-
-        // ── Color dynamics ────────────────────────────────────────────────────
-        let colorMix = d.colorFgBgMix;
-        if (luts && d.colorMixPressureCurve.mode !== 'off') {
-            colorMix *= sampleDynLUT(luts, DLUT_COLOR_MIX, effP);
-        }
-        colorMix = Math.max(0, Math.min(1, colorMix));
-
-        let r = d.color[0] * (1 - colorMix) + d.color2[0] * colorMix;
-        let g = d.color[1] * (1 - colorMix) + d.color2[1] * colorMix;
-        let b = d.color[2] * (1 - colorMix) + d.color2[2] * colorMix;
+        let r = d.color[0];
+        let g = d.color[1];
+        let b = d.color[2];
         const a = d.color[3];
 
         // HSV jitter (per-stroke + per-tip)
@@ -464,19 +387,27 @@ export class StrokeEngine {
             r = rgb.r; g = rgb.g; b = rgb.b;
         }
 
-        // ── Grain depth curve ─────────────────────────────────────────────────
-        let grainDepthScale = 1.0;
-        if (luts && d.grainDepthCurve.mode !== 'off') {
-            grainDepthScale = sampleDynLUT(luts, DLUT_GRAIN_DEPTH, effP);
-        }
+        const grainDepthScale = 1.0;
 
-        // ── Start taper ───────────────────────────────────────────────────────
-        let taperMult = 1.0;
-        if (d.taperStart > 0 && this.strokeDistance < d.taperStart) {
-            taperMult = this.strokeDistance / d.taperStart;
+        // ── Glaze accumulation mode — pack delta into opacity field ──────────
+        // In glaze mode the stamp doesn't blend directly; its opacity field carries
+        // the per-pixel accumulation delta which is summed in a GPU r16float buffer.
+        // Delta formula: opacity × flow × flowMult × effP / normK
+        //   normK: spacing normalisation so coverage rate is constant vs spacing.
+        if (d.glazeMode && d.glazeMode !== 'off') {
+            const normK = d.spacing < 0.5 ? Math.max(1, Math.round(0.5 / d.spacing)) : 1;
+            const stampDelta = (d.opacity * d.flow * flowMult * effP) / normK;
+            const finalSizeGlaze = d.size * sizeMult;
+            this.stamps.push(
+                x, y, effP, finalSizeGlaze,
+                r, g, b, a,
+                stampTiltX, stampTiltY,
+                stampDelta, stampAngle,
+                roundness, grainDepthScale,
+                0, 0
+            );
+            return;
         }
-        const taperSize    = d.taperSizeLink    ? taperMult : 1.0;
-        const taperOpacity = d.taperOpacityLink ? taperMult : 1.0;
 
         // ── Paint depletion ───────────────────────────────────────────────────
         // paintCharge depletes over the stroke when paintLoad < 1.
@@ -497,8 +428,8 @@ export class StrokeEngine {
         }
         const wetFactor = this.paintCharge * (1.0 - wetness * 0.3);
 
-        const finalSize = d.size * sizeMult * taperSize;
-        let   finalOpacity = d.opacity * opacityMult * d.flow * flowMult * taperOpacity * wetFactor;
+        const finalSize = d.size * sizeMult;
+        let   finalOpacity = d.opacity * opacityMult * d.flow * flowMult * wetFactor;
 
         // ── Spacing normalisation ─────────────────────────────────────────────
         // At very low spacing, many overlapping stamps accumulate opacity non-linearly.
@@ -547,64 +478,14 @@ export class StrokeEngine {
             }
         }
 
-        // ── P8: Bristle tip — emit cluster of micro-stamps ────────────────────
-        if (d.bristleCount > 0) {
-            // Each bristle is a smaller stamp; size scaled so coverage is comparable
-            const bristleSize = finalSize * (0.55 / Math.sqrt(d.bristleCount));
-            const spread      = finalSize * d.bristleLength * 0.5;
-            const ca          = Math.cos(stampAngle);
-            const sa          = Math.sin(stampAngle);
-
-            for (let bi = 0; bi < this.bristleOffsets.length; bi++) {
-                const off = this.bristleOffsets[bi];
-                // Rotate fiber offset by current stamp angle so bristle cluster
-                // aligns with stroke direction when followStroke is on
-                const rx = off.x * ca - off.y * sa;
-                const ry = off.x * sa + off.y * ca;
-                const bx = x + rx * spread;
-                const by = y + ry * spread;
-                // Per-fiber opacity variation for natural hair texture
-                const bOpacity = finalOpacity * (0.6 + this.nextRand() * 0.4);
-                this.emitStamp(d.taperEnd, [
-                    bx, by, effP, bristleSize,
-                    r, g, b, a,
-                    stampTiltX, stampTiltY,
-                    bOpacity, stampAngle,
-                    roundness, grainDepthScale,
-                    0, 0
-                ]);
-            }
-            return; // bristle mode replaces normal stamp emission
-        }
-
-        // ── Normal stamp count (scatter) ──────────────────────────────────────
-        const stampCount = Math.max(1,
-            Math.round(d.stampCount + (this.nextRand() - 0.5) * 2 * d.stampCountJitter)
+        this.stamps.push(
+            x, y, effP, finalSize,
+            r, g, b, a,
+            stampTiltX, stampTiltY,
+            finalOpacity, stampAngle,
+            roundness, grainDepthScale,
+            0, 0
         );
-
-        for (let si = 0; si < stampCount; si++) {
-            const sx = x + (this.nextRand() - 0.5) * 2 * d.scatterX * scatterScale;
-            const sy = y + (this.nextRand() - 0.5) * 2 * d.scatterY * scatterScale;
-
-            this.emitStamp(d.taperEnd, [
-                sx, sy, effP, finalSize,
-                r, g, b, a,
-                stampTiltX, stampTiltY,
-                finalOpacity, stampAngle,
-                roundness, grainDepthScale,
-                0, 0
-            ]);
-        }
-    }
-
-    // Route a stamp through the tail buffer (for end taper) or directly to stamps.
-    // opacity is at index 10 in the floats array.
-    private emitStamp(taperEnd: number, floats: number[]): void {
-        if (taperEnd > 0) {
-            this.tailBuffer.push({ floats, dist: this.strokeDistance });
-        } else {
-            for (const f of floats) this.stamps.push(f);
-        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
