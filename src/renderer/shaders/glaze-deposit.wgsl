@@ -14,12 +14,13 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
 }
 
 fn glazeCurve(mode: u32, x: f32) -> f32 {
+    let v = clamp(x, 0.0, 1.0);
     switch mode {
-        case 1u: { return 1.0 - exp(-2.0 * x); }                          // light
-        case 2u: { return clamp(x, 0.0, 1.0); }                           // uniform
-        case 3u: { return clamp(pow(max(x, 0.0), 0.7), 0.0, 1.0); }      // heavy
-        case 4u: { return clamp(pow(max(x, 0.0), 0.4), 0.0, 1.0); }      // intense
-        default: { return clamp(x, 0.0, 1.0); }
+        case 1u: { return 1.0 - exp(-2.5 * v); }              // light   — gentle ramp, caps ~0.92
+        case 2u: { return pow(v, 0.75); }                      // uniform — slight lift, feels even
+        case 3u: { return pow(v, 0.5); }                       // heavy   — square-root lift
+        case 4u: { return pow(v, 0.35); }                      // intense — strong early punch
+        default: { return pow(v, 0.75); }
     }
 }
 
@@ -57,7 +58,14 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
 @fragment
 fn fs_main(@builtin(position) fragPos: vec4<f32>) -> @location(0) vec4<f32> {
     let uv    = fragPos.xy / u.resolution;
-    let b_raw = textureSample(glazeTex, glazeSmp, uv).r;
+    // Log-space buffer: value = sum of log(1 - d_i) ≤ 0
+    // Convert: b = 1 - exp(log_sum) = 1 - prod(1 - d_i)
+    let log_r_raw = textureSample(glazeTex, glazeSmp, uv).r;
+    if log_r_raw >= 0.0 { discard; }  // Untouched pixels (log(1-0) = 0)
+    // Clamp accumulated log range: prevents exp() underflow (-20 ≈ full opacity anyway)
+    // and keeps gradient smooth near saturation.
+    let log_r = clamp(log_r_raw, -12.0, 0.0);
+    let b_raw = clamp(1.0 - exp(log_r), 0.0, 1.0);
     if b_raw < 0.001 { discard; }
 
     let b     = glazeCurve(u.glazeMode, b_raw);
