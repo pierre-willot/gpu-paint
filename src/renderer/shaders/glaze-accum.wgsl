@@ -1,13 +1,8 @@
 // glaze-accum.wgsl — Pass A: accumulate stamp alpha deltas into r16float glazeBuffer
 //
-// Same vertex setup as brush.wgsl.  Fragment implements log-space soft accumulation:
-//   output = log(1 - d)   (a negative value in [-0.693, 0])
-// GPU additive blend sums all log(1-d_i) contributions across all overlapping stamps,
-// including multiple stamps in the same draw call (fast strokes).
-// At deposit time: b = 1 - exp(accumulated_log_sum) = 1 - prod(1 - d_i)
-// This is identical to sequential soft accumulation but requires no ping-pong.
-// Render target format: r16float.  Blend state: additive (one/one).
-// loadOp: 'load' — preserves accumulated sum across chunks within the same stroke.
+// Same vertex setup as brush.wgsl.  Fragment outputs a single f32 = delta × stampMask.
+// Render target format: r16float.  Blend state: one + one (additive).
+// loadOp: 'load' — preserves accumulation across multiple stamp batches per stroke.
 
 const PI: f32 = 3.14159265358979;
 
@@ -83,9 +78,7 @@ fn vs_main(
 }
 
 // ── Fragment shader ───────────────────────────────────────────────────────────
-// Log-space accumulation: output = log(1 - d)
-// Additive blend sums contributions from all overlapping stamps.
-// Deposit converts: b = 1 - exp(accumulated_sum) = 1 - prod(1 - d_i)
+// Returns a scalar f32 — the delta contribution to the accumulation buffer.
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) f32 {
@@ -93,7 +86,7 @@ fn fs_main(in: VertexOut) -> @location(0) f32 {
 
     // Selection mask — skip outside selection
     let mask_val = textureSampleLevel(maskTex, maskSmp, canvas_uv, 0.0).r;
-    if mask_val < 0.004 { discard; }
+    if mask_val < 0.004 { return 0.0; }
 
     // Stamp shape (same as brush.wgsl)
     let tilt_mag    = length(in.tilt);
@@ -112,36 +105,12 @@ fn fs_main(in: VertexOut) -> @location(0) f32 {
         let gaussian    = exp(-dist * dist * 5.54);
         alpha_base = tipAlpha * mix(gaussian, hard_mask, in.hardness);
     } else {
-        if dist > 1.0 { discard; }
+        if dist > 1.0 { return 0.0; }
         let aa_w      = clamp(1.5 / max(in.radius_px, 1.0), 0.01, 0.5);
         let hard_mask = smoothstep(1.0, 1.0 - aa_w, dist);
         let gaussian  = exp(-dist * dist * 5.54);
         alpha_base = mix(gaussian, hard_mask, in.hardness);
     }
 
-    // Reduce per-stamp delta slightly to counteract dense fast-stroke over-accumulation.
-    // 0.85 factor keeps saturation rate similar to slow strokes.
-    var d = clamp(in.delta * pow(alpha_base, 1.5) * mask_val * 0.85, 0.0, 0.45);
-
-    // Grain-aware: when tip texture loaded, modulate delta by grain value directly
-    // This makes paint accumulate where grain allows it (dry media realism)
-    if u.useTipTex != 0u {
-        let grainUV  = rot * 0.5 + 0.5;
-        let grainVal = textureSampleLevel(tipTex, tipSmp, grainUV, 0.0).r;
-        d *= grainVal;
-    }
-
-    // Discard near-zero contributions — avoids polluting the log-sum with
-    // log(1-~0) ≈ 0 noise from brush edges across thousands of stamps.
-    if d < 0.001 { discard; }
-
-    // Guard: ensure 1-d > 0 before log (d is ≤ 0.45 so this is always true,
-    // but epsilon prevents any float precision edge case giving log(0) = -inf).
-    let safe_d = min(d, 0.9999);
-
-    // Log-space contribution: log(1 - d) ∈ [-0.693, 0) for d ∈ (0, 0.45]
-    // GPU additive blend accumulates all overlapping stamp contributions in one pass.
-    // Clamp the per-stamp log contribution so a single full-coverage stamp cannot
-    // dominate — keeps the system stable even at pressure=1 over a small area.
-    return max(log(1.0 - safe_d), -1.5);
+    return in.delta * alpha_base * mask_val;
 }

@@ -389,24 +389,26 @@ export class StrokeEngine {
 
         const grainDepthScale = 1.0;
 
-        // ── Glaze accumulation mode ──────────────────────────────────────────────
+        // ── Glaze accumulation mode — pack delta into opacity field ──────────
+        // In glaze mode the stamp doesn't blend directly; its opacity field carries
+        // the per-pixel accumulation delta which is summed in a GPU r16float buffer.
+        // Delta formula: opacity × flow × flowMult × effP / normK
+        //   normK: spacing normalisation so coverage rate is constant vs spacing.
         if (d.glazeMode && d.glazeMode !== 'off') {
-
-            const finalSize  = d.size * sizeMult;
-            // stampDelta in [0..1] — density removed: soft accumulation is self-saturating
-            const stampDelta = d.opacity * d.flow * flowMult * effP;
-
+            const normK = d.spacing < 0.5 ? Math.max(1, Math.round(0.5 / d.spacing)) : 1;
+            const stampDelta = (d.opacity * d.flow * flowMult * effP) / normK;
+            const finalSizeGlaze = d.size * sizeMult;
             this.stamps.push(
-                x, y, effP, finalSize,
+                x, y, effP, finalSizeGlaze,
                 r, g, b, a,
                 stampTiltX, stampTiltY,
                 stampDelta, stampAngle,
                 roundness, grainDepthScale,
                 0, 0
             );
-
             return;
         }
+
         // ── Paint depletion ───────────────────────────────────────────────────
         // paintCharge depletes over the stroke when paintLoad < 1.
         // At paintLoad=1: no depletion. At paintLoad=0.5: brush fades over stroke.
@@ -429,11 +431,13 @@ export class StrokeEngine {
         const finalSize = d.size * sizeMult;
         let   finalOpacity = d.opacity * opacityMult * d.flow * flowMult * wetFactor;
 
-       // ── Continuous Spacing Normalisation (Standard Blending) ──────────────
+        // ── Spacing normalisation ─────────────────────────────────────────────
+        // At very low spacing, many overlapping stamps accumulate opacity non-linearly.
+        // Scale per-stamp opacity down so the perceived coverage is consistent
+        // regardless of spacing, using the inverse compound formula 1-(1-x)^(1/k).
         if (d.spacing < 0.5) {
-            // Continuous compound alpha distribution
-            const exponent = Math.max(0.0001, d.spacing / 0.5); 
-            finalOpacity = 1.0 - Math.pow(Math.max(0, 1.0 - finalOpacity), exponent);
+            const k = Math.max(1, Math.round(0.5 / d.spacing));
+            finalOpacity = 1 - Math.pow(Math.max(0, 1 - finalOpacity), 1 / k);
         }
 
         this.strokeDistance += spacing;
