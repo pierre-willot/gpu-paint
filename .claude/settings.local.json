@@ -10,7 +10,9 @@
       "Bash(git push:*)",
       "Bash(grep -r \"float16\\\\|Float16\\\\|f16\" /d/Github/gpu-paint/src --include=*.ts --include=*.wgsl)",
       "Bash(find /d/Github/gpu-paint/src/renderer -name *dirty* -o -name *region*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(ls:*)",
+      "Bash(xargs grep:*)"
     ]
   }
 }

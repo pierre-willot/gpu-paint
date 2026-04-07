@@ -516,8 +516,10 @@ export class BrushRenderer {
             addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge'
         });
 
-        // ── Accumulation buffer (r16float) ────────────────────────────────
-        this.glazeBuffer = device.createTexture({
+        // ── Log-space accumulation buffer (r16float) ──────────────────────
+        // Log-space approach: no ping-pong needed. Single buffer accumulates
+        // log(1-d) per stamp via additive blend; deposit converts with exp().
+        this.glazeBuffer     = device.createTexture({
             size:   [this.canvasWidth, this.canvasHeight],
             format: 'r16float',
             usage:  GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
@@ -587,6 +589,8 @@ export class BrushRenderer {
         };
 
         // ── Accumulation pipeline (r16float target, additive blend) ──────
+        // Additive blend accumulates log(1-d) contributions from all stamps,
+        // including multiple overlapping stamps in a single draw call.
         const accumModule = device.createShaderModule({ code: glazeAccumSrc });
         this.glazeAccumPipeline = device.createRenderPipeline({
             layout: device.createPipelineLayout({ bindGroupLayouts: [this.glazeAccumBGL] }),
@@ -641,7 +645,8 @@ export class BrushRenderer {
             [this.canvasWidth, this.canvasHeight]
         );
 
-        // Clear glazeBuffer to 0
+        // Clear log-space accumulation buffer to 0
+        // log(1-0) = 0, so 0 represents "no accumulation"
         const clearPass = enc.beginRenderPass({
             colorAttachments: [{
                 view:       this.glazeBufferView,
@@ -715,7 +720,7 @@ export class BrushRenderer {
     private _drawGlazeChunk(stamps: Float32Array, targetTexture: GPUTexture, dirtyRect: DirtyRect): void {
         if (!this.glazeAccumPipeline || !this.glazeDepositPipeline) return;
         if (!this.glazeAccumBGL || !this.glazeDepositBGL) return;
-        if (!this.glazeBuffer || !this.glazeBufferView) return;
+        if (!this.glazeBufferView) return;
         if (!this.strokeBaseLayer || !this.strokeBaseView) return;
         if (!this.glazeAccumUniforms || !this.glazeDepositUniforms) return;
         if (!this.glazeSampler) return;
@@ -734,7 +739,11 @@ export class BrushRenderer {
         this.writeGlazeAccumUniforms();
         this.writeGlazeDepositUniforms(cr, cg, cb);
 
-        // Build bind groups (cheap — no heavy allocation)
+        // ── Pass A: log-space accumulation ────────────────────────────────────
+        // Additive blend: each stamp adds log(1-d) to the buffer.
+        // Multiple overlapping stamps in the same draw call all contribute correctly
+        // because GPU ROPs sum all fragment outputs. loadOp 'load' preserves
+        // accumulated log-sum from previous chunks within the same stroke.
         const accumBG = this.device.createBindGroup({
             layout: this.glazeAccumBGL,
             entries: [
@@ -742,30 +751,11 @@ export class BrushRenderer {
                 { binding: 1, resource: this.activeMaskView ?? this.dummyMaskView },
                 { binding: 2, resource: this.maskSampler },
                 { binding: 3, resource: this.activeTipView ?? this.dummyTipView },
-                { binding: 4, resource: this.tipSampler }
-            ]
-        });
-
-        // r16float sampler must be non-filtering
-        const glazeNFSampler = this.device.createSampler({
-            magFilter: 'nearest', minFilter: 'nearest',
-            addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge'
-        });
-
-        const depositBG = this.device.createBindGroup({
-            layout: this.glazeDepositBGL,
-            entries: [
-                { binding: 0, resource: { buffer: this.glazeDepositUniforms } },
-                { binding: 1, resource: this.glazeBufferView },
-                { binding: 2, resource: glazeNFSampler },
-                { binding: 3, resource: this.strokeBaseView },
-                { binding: 4, resource: this.glazeSampler }
+                { binding: 4, resource: this.tipSampler },
             ]
         });
 
         const encoder = this.device.createCommandEncoder();
-
-        // ── Pass A: accumulate stamps → glazeBuffer (additive) ────────────
         const accumPass = encoder.beginRenderPass({
             colorAttachments: [{
                 view:    this.glazeBufferView,
@@ -779,9 +769,28 @@ export class BrushRenderer {
         accumPass.draw(4, stamps.length / FLOATS_PER_STAMP);
         accumPass.end();
 
-        // ── Pass B: deposit glazeBuffer → targetTexture (overwrite) ──────
+        this.device.queue.submit([encoder.finish()]);
+
+        // ── Pass B: deposit accumulated glaze → layer texture ─────────────────
+        // Reads log-sum buffer, converts to b = 1 - exp(sum), blends onto strokeBase.
+        const glazeNFSampler = this.device.createSampler({
+            magFilter: 'nearest', minFilter: 'nearest',
+            addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge'
+        });
+        const depositBG = this.device.createBindGroup({
+            layout: this.glazeDepositBGL,
+            entries: [
+                { binding: 0, resource: { buffer: this.glazeDepositUniforms } },
+                { binding: 1, resource: this.glazeBufferView },
+                { binding: 2, resource: glazeNFSampler },
+                { binding: 3, resource: this.strokeBaseView },
+                { binding: 4, resource: this.glazeSampler }
+            ]
+        });
+
+        const encoder2 = this.device.createCommandEncoder();
         const depositView = targetTexture.createView();
-        const depositPass = encoder.beginRenderPass({
+        const depositPass = encoder2.beginRenderPass({
             colorAttachments: [{
                 view:    depositView,
                 loadOp:  'load',
@@ -790,15 +799,14 @@ export class BrushRenderer {
         });
         depositPass.setPipeline(this.glazeDepositPipeline);
         depositPass.setBindGroup(0, depositBG);
-        // Scissor to dirty rect so we only overwrite affected pixels
         depositPass.setScissorRect(
             dirtyRect.x, dirtyRect.y,
             dirtyRect.width, dirtyRect.height
         );
-        depositPass.draw(6);  // 2 triangles = fullscreen quad
+        depositPass.draw(6);
         depositPass.end();
 
-        this.device.queue.submit([encoder.finish()]);
+        this.device.queue.submit([encoder2.finish()]);
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
