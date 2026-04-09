@@ -12,7 +12,12 @@
       "Bash(find /d/Github/gpu-paint/src/renderer -name *dirty* -o -name *region*)",
       "Bash(awk:*)",
       "Bash(ls:*)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(git revert:*)",
+      "Bash(git stash:*)",
+      "Bash(grep -n \"bgra8unorm\\\\|rgba8unorm\\\\|rgba16float\" /d/Github/gpu-paint/src/renderer/*.ts)",
+      "Read(//d/Github/gpu-paint/src/renderer/**)",
+      "Bash(grep -n \"srgb\\\\|linear\" /d/Github/gpu-paint/src/brush/brush.wgsl /d/Github/gpu-paint/src/renderer/shaders/*.wgsl)"
     ]
   }
 }

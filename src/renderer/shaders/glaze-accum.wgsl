@@ -105,31 +105,23 @@ fn fs_main(in: VertexOut) -> @location(0) f32 {
 
     var alpha_base: f32;
     if u.useTipTex != 0u {
-        let tipUV       = rot * 0.5 + 0.5;
-        let tipAlpha    = textureSampleLevel(tipTex, tipSmp, tipUV, 0.0).r;
-        let aa_w        = clamp(1.5 / max(in.radius_px, 1.0), 0.01, 0.5);
-        let hard_mask   = smoothstep(1.0, 1.0 - aa_w, dist);
-        let gaussian    = exp(-dist * dist * 5.54);
+        let tipUV    = rot * 0.5 + 0.5;
+        let tipAlpha = textureSampleLevel(tipTex, tipSmp, tipUV, 0.0).r;
+        let aa_w     = clamp(1.0 / max(in.radius_px, 1.0), 0.005, 0.2);
+        let hard_mask = smoothstep(1.0, 1.0 - aa_w, dist);
+        let gaussian  = exp(-dist * dist * 3.5);
         alpha_base = tipAlpha * mix(gaussian, hard_mask, in.hardness);
     } else {
         if dist > 1.0 { discard; }
-        let aa_w      = clamp(1.5 / max(in.radius_px, 1.0), 0.01, 0.5);
+        let aa_w      = clamp(1.0 / max(in.radius_px, 1.0), 0.005, 0.2);
         let hard_mask = smoothstep(1.0, 1.0 - aa_w, dist);
-        let gaussian  = exp(-dist * dist * 5.54);
+        let gaussian  = exp(-dist * dist * 3.5);
         alpha_base = mix(gaussian, hard_mask, in.hardness);
     }
 
     // Reduce per-stamp delta slightly to counteract dense fast-stroke over-accumulation.
     // 0.85 factor keeps saturation rate similar to slow strokes.
     var d = clamp(in.delta * pow(alpha_base, 1.5) * mask_val * 0.85, 0.0, 0.45);
-
-    // Grain-aware: when tip texture loaded, modulate delta by grain value directly
-    // This makes paint accumulate where grain allows it (dry media realism)
-    if u.useTipTex != 0u {
-        let grainUV  = rot * 0.5 + 0.5;
-        let grainVal = textureSampleLevel(tipTex, tipSmp, grainUV, 0.0).r;
-        d *= grainVal;
-    }
 
     // Discard near-zero contributions — avoids polluting the log-sum with
     // log(1-~0) ≈ 0 noise from brush edges across thousands of stamps.

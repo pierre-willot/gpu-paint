@@ -32,9 +32,13 @@ export class PaintPipeline {
     private compositeRenderer: CompositeRenderer;
     private checkpointManager: CheckpointManager;
 
-    private overlayTexture:  GPUTexture;
-    private backingTexture:  GPUTexture;
-    private needsRedraw      = true;
+    private overlayTexture:   GPUTexture;
+    private backingTexture:   GPUTexture;
+    // Staging texture for non-normal blend mode layers: holds a copy of
+    // backingTexture from before the current layer is applied so the shader
+    // can read the backdrop without reading from the active render target.
+    private backdropTexture:  GPUTexture;
+    private needsRedraw       = true;
 
     // ── Transform mode state ─────────────────────────────────────────────────
     private transformPipelineInstance: TransformPipeline | null = null;
@@ -101,6 +105,14 @@ export class PaintPipeline {
                 GPUTextureUsage.TEXTURE_BINDING   |
                 GPUTextureUsage.COPY_SRC          |
                 GPUTextureUsage.COPY_DST
+        });
+
+        // backdropTexture: same format/size as backingTexture.
+        // Only needs TEXTURE_BINDING + COPY_DST (never a render target).
+        this.backdropTexture = _device.createTexture({
+            size:   [canvasWidth, canvasHeight],
+            format: _format,
+            usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
         });
 
         if (supportsTimestamps) this.initGPUTiming();
@@ -281,6 +293,7 @@ export class PaintPipeline {
         this.activeLayerIndex = Math.min(oldActive, this.layers.length - 1);
 
         this.backingTexture.destroy();
+        this.backdropTexture.destroy();
         this.overlayTexture.destroy();
         this.canvasWidth  = physW;
         this.canvasHeight = physH;
@@ -289,6 +302,10 @@ export class PaintPipeline {
             size: [physW, physH], format: this._format,
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING |
                    GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST
+        });
+        this.backdropTexture = this._device.createTexture({
+            size:  [physW, physH], format: this._format,
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
         });
         this.overlayTexture = createPersistentTexture(this._device, physW, physH, this.layerFormat);
 
@@ -392,9 +409,27 @@ export class PaintPipeline {
         const d = new Uint8Array(buf.getMappedRange());
         const [b0, b1, b2, b3] = [d[0], d[1], d[2], d[3]];
         buf.unmap(); buf.destroy();
-        return this._format === 'bgra8unorm'
-            ? [b2/255, b1/255, b0/255, b3/255]
-            : [b0/255, b1/255, b2/255, b3/255];
+        // backingTexture stores linear premultiplied values.
+        // Unpremultiply, then convert linear → sRGB for use as brush colour.
+        const linearToSrgb = (c: number) => {
+            const f = Math.max(0, Math.min(1, c));
+            return f <= 0.0031308 ? f * 12.92 : 1.055 * Math.pow(f, 1 / 2.4) - 0.055;
+        };
+        const a = b3 / 255;
+        const invA = a > 0.0001 ? 1 / a : 0;
+        if (this._format === 'bgra8unorm') {
+            // bytes: [B, G, R, A]
+            const rLin = (b2 / 255) * invA;
+            const gLin = (b1 / 255) * invA;
+            const bLin = (b0 / 255) * invA;
+            return [linearToSrgb(rLin), linearToSrgb(gLin), linearToSrgb(bLin), a];
+        } else {
+            // rgba8unorm: bytes [R, G, B, A]
+            const rLin = (b0 / 255) * invA;
+            const gLin = (b1 / 255) * invA;
+            const bLin = (b2 / 255) * invA;
+            return [linearToSrgb(rLin), linearToSrgb(gLin), linearToSrgb(bLin), a];
+        }
     }
 
     // ── Autosave ──────────────────────────────────────────────────────────────
@@ -488,16 +523,18 @@ export class PaintPipeline {
         if (this.gpuTiming && !this.gpuTiming.pending) {
             this.compositeWithTiming(this.backingTexture.createView(), scissor, texOverride);
         } else {
-            this.compositeRenderer.render(this.backingTexture.createView(), this.layers, this.overlayTexture, scissor, undefined, texOverride);
+            this.compositeRenderer.render(
+                this.backingTexture.createView(), this.backingTexture, this.backdropTexture,
+                this.layers, this.overlayTexture, scissor, undefined, texOverride
+            );
         }
 
         if (this.selectionManager.hasMask) {
             this.selectionManager.renderOverlay(this.backingTexture.createView(), performance.now());
         }
 
-        const enc = this._device.createCommandEncoder();
-        enc.copyTextureToTexture({ texture: this.backingTexture }, { texture: cur }, [this.canvasWidth, this.canvasHeight]);
-        this._device.queue.submit([enc.finish()]);
+        // Final blit: encode linear backingTexture → sRGB canvas swap chain.
+        this.compositeRenderer.blitSrgb(this.backingTexture, cur.createView());
     }
 
     public markDirty(): void {
@@ -603,12 +640,19 @@ export class PaintPipeline {
     }
 
     public async saveImage(): Promise<void> {
-        const exp = createPersistentTexture(this._device, this.canvasWidth, this.canvasHeight, this._format);
-        const ov  = createPersistentTexture(this._device, this.canvasWidth, this.canvasHeight, this._format);
+        const exp  = createPersistentTexture(this._device, this.canvasWidth, this.canvasHeight, this._format);
+        const ov   = createPersistentTexture(this._device, this.canvasWidth, this.canvasHeight, this._format);
+        const back = this._device.createTexture({
+            size:  [this.canvasWidth, this.canvasHeight], format: this._format,
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+        });
         this.layerManager.clearTexture(ov);
-        this.compositeRenderer.render(exp.createView(), this.layers, ov, null);
-        await downloadTexture(this._device, exp, 'artwork.png', this._format);
-        exp.destroy(); ov.destroy();
+        this.compositeRenderer.render(exp.createView(), exp, back, this.layers, ov, null);
+        // Export needs sRGB-encoded PNG. Blit linear exp → sRGB srgbExp.
+        const srgbExp = createPersistentTexture(this._device, this.canvasWidth, this.canvasHeight, this._format);
+        this.compositeRenderer.blitSrgb(exp, srgbExp.createView());
+        await downloadTexture(this._device, srgbExp, 'artwork.png', this._format);
+        exp.destroy(); ov.destroy(); back.destroy(); srgbExp.destroy();
     }
 
     public async saveProject(filename = 'artwork.gpaint'): Promise<void> {
@@ -702,7 +746,10 @@ export class PaintPipeline {
 
     private compositeWithTiming(targetView: GPUTextureView, scissor: DirtyRect | null, texOverride?: { layerIndex: number; texture: GPUTexture } | null): void {
         const t = this.gpuTiming!;
-        this.compositeRenderer.render(targetView, this.layers, this.overlayTexture, scissor, t.querySet, texOverride);
+        this.compositeRenderer.render(
+            targetView, this.backingTexture, this.backdropTexture,
+            this.layers, this.overlayTexture, scissor, t.querySet, texOverride
+        );
         const enc = this._device.createCommandEncoder();
         enc.resolveQuerySet(t.querySet, 0, 2, t.queryBuffer, 0);
         enc.copyBufferToBuffer(t.queryBuffer, 0, t.readBuffer, 0, 16);

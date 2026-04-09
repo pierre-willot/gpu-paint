@@ -2,6 +2,23 @@ import smudgeShaderSource         from './shaders/smudge.wgsl?raw';
 import { BYTES_PER_STAMP, FLOATS_PER_STAMP } from './pipeline-cache';
 import type { DirtyRect }         from './brush-renderer';
 
+// Minimal blit shader — copies any float-sampleable texture to rgba16float target.
+// Used in beginStroke to seed carry from the bgra8unorm layer (format mismatch
+// prevents copyTextureToTexture).
+const BLIT_SHADER = /* wgsl */`
+@group(0) @binding(0) var tex: texture_2d<f32>;
+@group(0) @binding(1) var smp: sampler;
+
+@vertex fn vs_blit(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
+    var pos = array<vec2f,3>(vec2f(-1.0,-1.0), vec2f(3.0,-1.0), vec2f(-1.0,3.0));
+    return vec4f(pos[vi], 0.0, 1.0);
+}
+
+@fragment fn fs_blit(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    return textureSample(tex, smp, pos.xy / vec2f(textureDimensions(tex)));
+}
+`;
+
 /**
  * Procreate-style GPU smudge renderer.
  *
@@ -22,6 +39,15 @@ export class SmudgeRenderer {
     private pickupPipeline:  GPURenderPipeline;
     private depositPipeline: GPURenderPipeline;
     private bindGroupLayout: GPUBindGroupLayout;
+
+    // Carry/scratch use rgba16float (16-bit half-float) rather than the canvas
+    // bgra8unorm format.  The wet_mix pass repeatedly reads→lerps→writes carry;
+    // with 8-bit precision, small increments (pull × mask × 1/256) are lost and
+    // accumulate into visible color-stepping banding.  Half-float gives ~1024
+    // effective steps per channel — imperceptibly fine for colour blending.
+    private static readonly CARRY_FORMAT = 'rgba16float' as GPUTextureFormat;
+    private blitPipeline: GPURenderPipeline;
+    private blitBGL:      GPUBindGroupLayout;
 
     // Ping-pong textures. After each chunk, swap so 'carry' always holds
     // the latest carry state and 'scratch' is free to be overwritten.
@@ -103,8 +129,8 @@ export class SmudgeRenderer {
             addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge',
         });
 
-        this.carryTexture   = this.makeCanvasTex();
-        this.scratchTexture = this.makeCanvasTex();
+        this.carryTexture   = this.makeCarryTex();
+        this.scratchTexture = this.makeCarryTex();
 
         this.bindGroupLayout = this.makeBindGroupLayout();
         const module         = device.createShaderModule({ code: smudgeShaderSource });
@@ -116,9 +142,27 @@ export class SmudgeRenderer {
             vertex:    { module, entryPoint: 'vs_main', buffers: [vb] },
             fragment:  {
                 module, entryPoint: 'fs_wet_mix',
-                targets: [{ format }], // no blend — overwrite
+                // rgba16float carry — eliminates 8-bit quantization banding
+                targets: [{ format: SmudgeRenderer.CARRY_FORMAT }],
             },
             primitive: { topology: 'triangle-strip' },
+        });
+
+        // Blit pipeline — converts bgra8unorm layer → rgba16float carry at stroke start.
+        // copyTextureToTexture cannot cross formats, so we use a render pass instead.
+        const blitModule    = device.createShaderModule({ code: BLIT_SHADER });
+        this.blitBGL        = device.createBindGroupLayout({
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+                { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering'  } },
+            ],
+        });
+        this.blitPipeline   = device.createRenderPipeline({
+            layout:    device.createPipelineLayout({ bindGroupLayouts: [this.blitBGL] }),
+            vertex:    { module: blitModule, entryPoint: 'vs_blit' },
+            fragment:  { module: blitModule, entryPoint: 'fs_blit',
+                         targets: [{ format: SmudgeRenderer.CARRY_FORMAT }] },
+            primitive: { topology: 'triangle-list' },
         });
 
         this.depositPipeline = device.createRenderPipeline({
@@ -145,14 +189,31 @@ export class SmudgeRenderer {
      * Initialising from the canvas means unvisited carry pixels are neutral
      * (canvas color), so the first stamp produces no outline or inverted-mask
      * artifacts regardless of pull/charge settings.
+     *
+     * Uses a blit render pass instead of copyTextureToTexture because carry is
+     * rgba16float while the layer is bgra8unorm — cross-format copies are invalid.
      */
     public beginStroke(layerTexture: GPUTexture): void {
-        const enc = this.device.createCommandEncoder();
-        enc.copyTextureToTexture(
-            { texture: layerTexture  },
-            { texture: this.carryTexture },
-            [this.width, this.height]
-        );
+        const bg  = this.device.createBindGroup({
+            layout:  this.blitBGL,
+            entries: [
+                { binding: 0, resource: layerTexture.createView() },
+                { binding: 1, resource: this.texSampler           },
+            ],
+        });
+        const enc  = this.device.createCommandEncoder();
+        const pass = enc.beginRenderPass({
+            colorAttachments: [{
+                view:       this.carryTexture.createView(),
+                loadOp:     'clear',
+                clearValue: { r: 0, g: 0, b: 0, a: 0 },
+                storeOp:    'store',
+            }],
+        });
+        pass.setPipeline(this.blitPipeline);
+        pass.setBindGroup(0, bg);
+        pass.draw(3);
+        pass.end();
         this.device.queue.submit([enc.finish()]);
     }
 
@@ -264,8 +325,8 @@ export class SmudgeRenderer {
         this.height = h;
         this.carryTexture.destroy();
         this.scratchTexture.destroy();
-        this.carryTexture   = this.makeCanvasTex();
-        this.scratchTexture = this.makeCanvasTex();
+        this.carryTexture   = this.makeCarryTex();
+        this.scratchTexture = this.makeCarryTex();
     }
 
     public setTipTexture(texture: GPUTexture | null): void {
@@ -299,10 +360,10 @@ export class SmudgeRenderer {
         });
     }
 
-    private makeCanvasTex(): GPUTexture {
+    private makeCarryTex(): GPUTexture {
         return this.device.createTexture({
             size:   [this.width, this.height],
-            format: this.format,
+            format: SmudgeRenderer.CARRY_FORMAT,
             usage:
                 GPUTextureUsage.TEXTURE_BINDING  |
                 GPUTextureUsage.RENDER_ATTACHMENT |

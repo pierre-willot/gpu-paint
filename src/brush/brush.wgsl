@@ -160,20 +160,23 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // ── Stamp alpha ───────────────────────────────────────────────────────
     var alpha_base: f32;
     if u.useTipTex != 0u {
-        // Image tip: sample texture in rotated stamp space, masked by circle falloff
+        // Image tip: sample texture in rotated stamp space, masked by circle falloff.
+        // AA width capped at 0.2 so even small brushes look crisp at hardness=1.
         let tipUV = rot_uv * 0.5 + 0.5;
         let tipAlpha = textureSampleLevel(tipTex, tipSmp, tipUV, 0.0).r;
-        // Compute circle falloff (same as procedural path) to mask the tip texture
-        let aa_width_tip  = clamp(1.5 / max(in.radius_px, 1.0), 0.01, 0.5);
+        let aa_width_tip  = clamp(1.0 / max(in.radius_px, 1.0), 0.005, 0.2);
         let hard_mask_tip = smoothstep(1.0, 1.0 - aa_width_tip, dist);
-        let gaussian_tip  = exp(-dist * dist * 5.54);
+        let gaussian_tip  = exp(-dist * dist * 3.5);
         let circle_alpha  = mix(gaussian_tip, hard_mask_tip, in.hardness);
         alpha_base = tipAlpha * circle_alpha;
     } else {
         if dist > 1.0 { discard; }
-        let aa_width   = clamp(1.5 / max(in.radius_px, 1.0), 0.01, 0.5);
+        // AA width: 1 px feather regardless of brush size, capped at 0.2 of radius.
+        // Smaller cap = visibly harder edge at hardness=1, even for tiny brushes.
+        let aa_width   = clamp(1.0 / max(in.radius_px, 1.0), 0.005, 0.2);
         let hard_mask  = smoothstep(1.0, 1.0 - aa_width, dist);
-        let gaussian   = exp(-dist * dist * 5.54);
+        // Less aggressive gaussian falloff for a wider, fuller soft-brush core.
+        let gaussian   = exp(-dist * dist * 3.5);
         alpha_base = mix(gaussian, hard_mask, in.hardness);
     }
 
@@ -232,10 +235,14 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // ── Wet mixing (canvas color pickup) ─────────────────────────────────
     if u.usePickup != 0u && u.pickupWetness > 0.0 {
         let pickupRaw = textureSampleLevel(pickupTex, pickupSmp, canvas_uv, 0.0);
-        // rgba16float layer textures use RGBA channel order — no swap needed.
-        let pickupColor = pickupRaw.rgb;
-        // Weight by pickup alpha so transparent canvas areas don't pull toward black.
-        // On empty canvas (alpha=0) this evaluates to 0, leaving finalColor unchanged.
+        // Unpremultiply the pickup sample before mixing: the layer texture stores
+        // premultiplied linear RGB, but finalColor is non-premultiplied.
+        // On empty canvas (alpha=0) strength evaluates to 0 → finalColor unchanged.
+        let pickup_a   = max(pickupRaw.a, 0.0001);
+        let pickupColor = clamp(
+            select(vec3<f32>(0.0), pickupRaw.rgb / pickup_a, pickupRaw.a > 0.0001),
+            vec3<f32>(0.0), vec3<f32>(1.0)
+        );
         let pickupStrength = u.pickupWetness * 0.7 * pickupRaw.a;
         finalColor = mix(finalColor, pickupColor, pickupStrength);
     }

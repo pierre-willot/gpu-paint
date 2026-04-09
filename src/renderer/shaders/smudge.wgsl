@@ -82,7 +82,7 @@ fn vs_main(
     let quad_r    = radius_px * aspect;
     let off_x     = quad_r * 2.0 / u.resolution.x;
     let off_y     = quad_r * 2.0 / u.resolution.y;
-    let tilt_az   = select(0.0, atan2(tilt.y, tilt.x) * (PI / 180.0), tilt_mag > 0.5);
+    let tilt_az   = select(0.0, atan2(tilt.y, tilt.x), tilt_mag > 0.5);
 
     var out: VertexOut;
     out.clip_pos    = vec4(center.x + quad[vi].x * off_x, center.y + quad[vi].y * off_y, 0.0, 1.0);
@@ -110,19 +110,26 @@ fn stamp_mask(in: VertexOut) -> f32 {
         let rot = vec2(in.uv.x * c - in.uv.y * s, in.uv.x * s + in.uv.y * c);
         dist    = length(vec2(rot.x / aspect, rot.y));
     }
+    // Hard boundary at dist=1 prevents spatial-mixing artifacts (purple fringing)
+    // caused by carry@prev_center sampling a different canvas region than layer@frag_uv.
     if dist > 1.0 { return 0.0; }
-    let aa    = clamp(1.5 / max(in.radius_px, 1.0), 0.01, 0.5);
-    let hard  = smoothstep(1.0, 1.0 - aa, dist);
-    let gauss = exp(-dist * dist * 5.54);
+    // Normalized shifted gaussian: smoothly reaches 0 at dist=1, avoiding both
+    // the ring artifact (from the old smoothstep) and the purple fringe (from no cutoff).
+    // mask(0)=1, mask(1)=0 by construction.  At high hardness g1≈0 so mask≈g.
+    let k    = mix(2.5, 8.0, u.hardness);
+    let g    = exp(-dist * dist * k);
+    let g1   = exp(-k);
+    let mask = max(0.0, (g - g1) / (1.0 - g1));
+    if mask < 0.001 { return 0.0; }
     if u.useTipTex != 0u {
-        // Normalize uv to [-1,1] stamp space (undo aspect stretch), then rotate
-        let norm_uv = vec2(in.uv.x / aspect, in.uv.y);
+        // Divide BOTH components by aspect to undo the aspect stretch before rotating
+        let norm_uv = in.uv / aspect;
         let rot_uv  = vec2(norm_uv.x * c - norm_uv.y * s, norm_uv.x * s + norm_uv.y * c);
         let tipUV   = clamp(rot_uv * 0.5 + vec2(0.5), vec2(0.0), vec2(1.0));
         let tipAlpha = textureSampleLevel(tipTex, tipSmp, tipUV, 0.0).r;
-        return mix(gauss, tipAlpha, u.hardness) * hard;
+        return tipAlpha * mask;
     }
-    return mix(gauss, hard, u.hardness);
+    return mask;
 }
 
 // ── Wet Mix ───────────────────────────────────────────────────────────────────
@@ -136,6 +143,12 @@ fn stamp_mask(in: VertexOut) -> f32 {
 // what transports colors along the stroke (smear / wet-drag effect).
 // user_color is non-premultiplied in the uniform — converted before the lerp.
 // No blend state (overwrite). loadOp:'load' preserves non-stamp carry values.
+//
+// IMPORTANT: all blending is done in NON-PREMULTIPLIED linear space.
+// Layer textures store premultiplied values; mixing premultiplied values with
+// differing alpha channels produces incorrect RGB (amplifies the lower-alpha
+// side's channels → purple fringing / color shift on semi-transparent pixels).
+// Unpremultiply first, blend, then re-premultiply for storage.
 @fragment
 fn fs_wet_mix(in: VertexOut) -> @location(0) vec4<f32> {
     let mask = stamp_mask(in);
@@ -143,20 +156,36 @@ fn fs_wet_mix(in: VertexOut) -> @location(0) vec4<f32> {
 
     let frag_uv = in.clip_pos.xy / u.resolution;
 
-    // Live canvas color at this pixel (premultiplied)
-    let layer = textureSample(tex_b, texSmp, frag_uv);
+    // Live canvas color at this pixel (premultiplied → unpremultiply for blending).
+    // Clamp after dividing: float16 can store out-of-range values on near-zero-alpha
+    // pixels from accumulation rounding, causing HDR artefacts during blending.
+    let layer_pm  = textureSample(tex_b, texSmp, frag_uv);
+    let layer_a   = max(layer_pm.a, 0.0001);
+    let layer_rgb = clamp(
+        select(vec3<f32>(0.0), layer_pm.rgb / layer_a, layer_pm.a > 0.0001),
+        vec3<f32>(0.0), vec3<f32>(1.0)
+    );
 
-    // Carry sampled from PREVIOUS stamp center — advects color forward
-    let carry = textureSample(tex_a, texSmp, in.prev_center);
+    // Carry sampled from PREVIOUS stamp center (premultiplied → unpremultiply).
+    let carry_pm  = textureSample(tex_a, texSmp, in.prev_center);
+    let carry_a   = max(carry_pm.a, 0.0001);
+    let carry_rgb = clamp(
+        select(vec3<f32>(0.0), carry_pm.rgb / carry_a, carry_pm.a > 0.0001),
+        vec3<f32>(0.0), vec3<f32>(1.0)
+    );
 
-    // Step B — absorb canvas into carry
-    let pulled = mix(carry, layer, u.pull * mask);
+    // Step B — absorb canvas into carry (non-premultiplied blend)
+    let t          = u.pull * mask;
+    let pulled_rgb = mix(carry_rgb, layer_rgb, t);
+    let pulled_a   = mix(carry_pm.a, layer_pm.a, t);
 
-    // Step C — inject fresh paint (convert sRGB user_color to linear premultiplied)
-    let uc_pm   = vec4(srgb_to_linear(u.user_color.rgb) * u.user_color.a, u.user_color.a);
-    let charged = mix(pulled, uc_pm, u.charge);
+    // Step C — inject fresh paint (user_color is sRGB non-premultiplied)
+    let uc_rgb      = srgb_to_linear(u.user_color.rgb);
+    let charged_rgb = mix(pulled_rgb, uc_rgb, u.charge);
+    let charged_a   = mix(pulled_a, u.user_color.a, u.charge);
 
-    return charged;
+    // Re-premultiply for storage
+    return vec4<f32>(charged_rgb * charged_a, charged_a);
 }
 
 // ── Deposit ───────────────────────────────────────────────────────────────────

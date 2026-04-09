@@ -7,6 +7,14 @@
 // Blend: one / zero (overwrite).  Scissor rect supplied by CPU.
 // Pixels with b < 0.001 are discarded (leave layer unchanged in scissor rect).
 
+// Triangular dither — same as brush.wgsl. Breaks 8-bit quantisation banding
+// on low-coverage glaze strokes (fallback bgra8unorm layer format).
+fn dither(pos: vec2<f32>) -> f32 {
+    let h  = fract(sin(dot(pos, vec2<f32>(127.1, 311.7))) * 43758.5453);
+    let h2 = fract(sin(dot(pos + 0.5, vec2<f32>(269.5, 183.3))) * 47853.5453);
+    return (h + h2 - 1.0) / 255.0;
+}
+
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
     let lo = c / 12.92;
     let hi = pow((c + 0.055) / 1.055, vec3<f32>(2.4));
@@ -73,7 +81,21 @@ fn fs_main(@builtin(position) fragPos: vec4<f32>) -> @location(0) vec4<f32> {
     let brush = srgb_to_linear(u.brushColor.rgb);
     let alpha = clamp(b, 0.0, 1.0);
 
-    let out_rgb = mix(base.rgb, brush, alpha);
-    let out_a   = mix(base.a, 1.0, alpha);
+    // Blend in premultiplied space: Porter-Duff "over" with opaque brush at coverage α.
+    //   out_premult = brush * α + base.rgb * (1 − α)  =  mix(base.rgb, brush, α)
+    //   out_a       = α + base.a * (1 − α)            =  mix(base.a,   1.0,   α)
+    //
+    // Doing this directly in premultiplied space avoids the alpha² darkening that
+    // the previous unpremultiply → mix → re-premultiply path produced for transparent
+    // base pixels (base.a = 0):
+    //   OLD: mix(0, brush, α) * α  =  brush * α²   ← WRONG
+    //   NEW: mix(0, brush, α)      =  brush * α     ← correct
+    //
+    // Clamp base.rgb before mixing: rgba16float accumulation rounding can push
+    // premultiplied values slightly above 1 on near-zero-alpha pixels, causing
+    // overly bright (HDR) samples.
+    let base_pm = clamp(base.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    let out_rgb = mix(base_pm, brush, alpha);
+    let out_a   = clamp(mix(base.a, 1.0, alpha) + dither(fragPos.xy), 0.0, 1.0);
     return vec4<f32>(out_rgb, out_a);
 }
